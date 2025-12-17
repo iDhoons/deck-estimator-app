@@ -7,7 +7,7 @@ import {
   type Product,
   type Ruleset
 } from "@deck/core";
-import { ko as t } from "./i18n/ko";
+import { t } from "./i18n";
 
 const product: Product = {
   id: "DN34",
