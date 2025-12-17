@@ -1,0 +1,27 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "outDir": "dist",
+    "declaration": true,
+    "declarationMap": true,
+    "emitDeclarationOnly": false,
+
+    "module": "ESNext",
+    "target": "ES2020",
+    "moduleResolution": "Bundler",
+
+    "skipLibCheck": true,
+    "strict": false,
+    "strictNullChecks": true,
+    "exactOptionalPropertyTypes": false,
+    "noUncheckedIndexedAccess": false
+  },
+  "include": ["src/**/*.ts"],
+  "exclude": [
+    "src/**/*.test.ts",
+    "src/**/__snapshots__/**",
+    "fixtures/**",
+    "node_modules/**",
+    "dist/**"
+  ]
+}
