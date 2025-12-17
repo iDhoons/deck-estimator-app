@@ -82,3 +82,24 @@ export type Quantities = {
 
   fasteners: { mode: FasteningMode; clips?: number; screws?: number };
 };
+
+export type CutPiece = {
+  id: string;
+  source: "stock" | "offcut";
+  colorGroup: string; // 같은 원자재(또는 계열) 묶음 → 색상 키
+  lengthMm: number;
+};
+
+export type CutRow = {
+  rowIndex: number;
+  requiredLenMm: number;
+  pieces: CutPiece[];
+  offcutMm: number;
+};
+
+export type CutPlan = {
+  stockLengthMm: number;
+  totalRows: number;
+  rows: CutRow[];
+  offcutsPoolMm: number[];
+};
