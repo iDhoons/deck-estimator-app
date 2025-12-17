@@ -1,5 +1,12 @@
 import { useMemo, useState } from "react";
-import { calculateQuantities, type FasteningMode, type Plan, type Product, type Ruleset } from "@deck/core";
+import {
+  calculateQuantities,
+  buildCutPlan,
+  type FasteningMode,
+  type Plan,
+  type Product,
+  type Ruleset
+} from "@deck/core";
 import { ko as t } from "./i18n/ko";
 
 const product: Product = {
@@ -59,6 +66,11 @@ function App() {
     return calculateQuantities(plan, product, rules, fastening);
   }, [rules, fastening]);
 
+  const cutPlan = useMemo(() => {
+    if (mode !== "pro") return null;
+    return buildCutPlan(plan, product, rules);
+  }, [mode, rules]);
+
   return (
     <div style={{ padding: 24, fontFamily: "system-ui", maxWidth: 1000 }}>
       <h1 style={{ marginBottom: 12 }}>{t.appTitle}</h1>
@@ -107,6 +119,15 @@ function App() {
           </div>
         </div>
       </div>
+
+      {mode === "pro" && cutPlan && (
+        <div style={{ marginBottom: 16 }}>
+          <div style={{ marginBottom: 8, fontWeight: 700 }}>컷플랜(전문가 모드)</div>
+          <pre style={{ background: "#111", color: "#6cf", padding: 12, borderRadius: 8, overflow: "auto" }}>
+            {JSON.stringify(cutPlan, null, 2)}
+          </pre>
+        </div>
+      )}
 
       <pre style={{ background: "#111", color: "#0f0", padding: 12, borderRadius: 8, overflow: "auto" }}>
         {JSON.stringify(out, null, 2)}
