@@ -1,0 +1,13 @@
+{
+  "products": [
+    {
+      "id": "DN34",
+      "name": "DN34",
+      "stockLengthMm": 3000,
+      "widthOptionsMm": [95, 120, 140, 150],
+      "thicknessMm": 25,
+      "gapMm": 5,
+      "fasteningModes": ["clip", "screw"]
+    }
+  ]
+}

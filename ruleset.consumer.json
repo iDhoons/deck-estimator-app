@@ -1,0 +1,17 @@
+{
+  "mode": "consumer",
+  "gapMm": 5,
+  "secondarySpacingMm": 400,
+  "primarySpacingMm": 600,
+  "anchorSpacingMm": 1000,
+  "footingSpacingMm": 1000,
+  "consumerLoss": {
+    "base": 0.03,
+    "vertexFactor": 0.003,
+    "cutoutFactor": 0.005,
+    "cap": 0.06
+  },
+  "screwPerIntersection": 2,
+  "showAdvancedOverrides": false,
+  "enableCutPlan": false
+}

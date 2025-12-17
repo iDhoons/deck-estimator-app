@@ -1,0 +1,12 @@
+{
+  "mode": "pro",
+  "gapMm": 5,
+  "secondarySpacingMm": 400,
+  "primarySpacingMm": 600,
+  "anchorSpacingMm": 1000,
+  "footingSpacingMm": 1000,
+  "kerfMm": 3,
+  "screwPerIntersection": 2,
+  "showAdvancedOverrides": true,
+  "enableCutPlan": true
+}
