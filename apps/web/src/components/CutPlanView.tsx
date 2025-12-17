@@ -26,12 +26,33 @@ export function CutPlanView({ cutPlan, width = 900 }: { cutPlan: CutPlan; width?
     for (const r of cutPlan.rows) for (const p of r.pieces) if (p.source === "stock") s.add(p.colorGroup);
     return Array.from(s).sort((a, b) => a.localeCompare(b));
   }, [cutPlan]);
+  const stats = useMemo(() => {
+  let stockPieces = 0;
+  let offcutPieces = 0;
+  let offcutLenMm = 0;
+
+  for (const r of cutPlan.rows) {
+    for (const p of r.pieces) {
+      if (p.source === "stock") stockPieces += 1;
+      else {
+        offcutPieces += 1;
+        offcutLenMm += p.lengthMm;
+      }
+    }
+  }
+  return { stockPieces, offcutPieces, offcutLenMm };
+}, [cutPlan]);
 
   return (
     <div style={{ border: "1px solid #333", borderRadius: 10, padding: 12 }}>
       <div style={{ marginBottom: 8, fontWeight: 800 }}>
         {t.section.cutPlan} · {t.label.stockLen}: {fmtInt(stock)}mm
       </div>
+      <div style={{ marginBottom: 8, fontSize: 12, opacity: 0.9 }}>
+  새 보드 사용 조각: <b>{stats.stockPieces}</b> ·
+  오프컷 재사용: <b>{stats.offcutPieces}</b>회 ·
+  재사용 길이: <b>{(stats.offcutLenMm / 1000).toFixed(2)}</b>m
+</div>
 
       {/* legend / controls */}
       <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center", marginBottom: 10 }}>
