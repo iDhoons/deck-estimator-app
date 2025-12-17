@@ -14,7 +14,9 @@ describe("calculateQuantities (fixtures)", () => {
     { fixture: "rect-2000x1000", mode: "clip" },
     { fixture: "rect-2000x1000", mode: "screw" },
     { fixture: "rect-2000x1000-rot90", mode: "clip" },
-    { fixture: "rect-2000x1000-rot90", mode: "screw" }
+    { fixture: "rect-2000x1000-rot90", mode: "screw" },
+    { fixture: "rect-2000x1000-with-stairs", mode: "clip" },
+    { fixture: "rect-2000x1000-with-stairs", mode: "screw" }
   ];
 
   for (const c of cases) {

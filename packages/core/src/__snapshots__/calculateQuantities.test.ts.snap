@@ -123,3 +123,65 @@ exports[`calculateQuantities (fixtures) > rect-2000x1000-rot90 screw 1`] = `
   },
 }
 `;
+
+exports[`calculateQuantities (fixtures) > rect-2000x1000-with-stairs clip 1`] = `
+{
+  "anchors": {
+    "qty": 10,
+  },
+  "area": {
+    "deckM2": 2,
+    "stairsM2": 0.3,
+    "totalM2": 2.3,
+  },
+  "boards": {
+    "lossRateApplied": 0.03,
+    "pieces": 5,
+    "stockLengthMm": 3000,
+    "usedLengthMm": 14000,
+  },
+  "fasteners": {
+    "clips": 35,
+    "mode": "clip",
+    "screws": undefined,
+  },
+  "footings": {
+    "qty": 10,
+  },
+  "substructure": {
+    "primaryLenM": 4,
+    "secondaryLenM": 5,
+  },
+}
+`;
+
+exports[`calculateQuantities (fixtures) > rect-2000x1000-with-stairs screw 1`] = `
+{
+  "anchors": {
+    "qty": 10,
+  },
+  "area": {
+    "deckM2": 2,
+    "stairsM2": 0.3,
+    "totalM2": 2.3,
+  },
+  "boards": {
+    "lossRateApplied": 0.03,
+    "pieces": 5,
+    "stockLengthMm": 3000,
+    "usedLengthMm": 14000,
+  },
+  "fasteners": {
+    "clips": undefined,
+    "mode": "screw",
+    "screws": 70,
+  },
+  "footings": {
+    "qty": 10,
+  },
+  "substructure": {
+    "primaryLenM": 4,
+    "secondaryLenM": 5,
+  },
+}
+`;

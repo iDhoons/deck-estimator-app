@@ -15,15 +15,12 @@
       "enabled": true,
       "footprintPolygon": {
         "outer": [
-          { "xMm": 0, "yMm": -300 },
-          { "xMm": 1000, "yMm": -300 },
-          { "xMm": 1000, "yMm": 0 },
-          { "xMm": 0, "yMm": 0 }
+          { "xMm": 0, "yMm": 1000 },
+          { "xMm": 1000, "yMm": 1000 },
+          { "xMm": 1000, "yMm": 1300 },
+          { "xMm": 0, "yMm": 1300 }
         ]
-      },
-      "widthMm": 1000,
-      "totalRiseMm": 450,
-      "sideCladding": true
+      }
     }
   },
   "product": {
