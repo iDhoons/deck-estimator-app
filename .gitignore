@@ -13,3 +13,9 @@ coverage/
 # misc
 .DS_Store
 .env
+
+# core build outputs
+packages/core/dist/
+packages/core/src/*.js
+packages/core/src/*.d.ts
+packages/core/src/*.map
