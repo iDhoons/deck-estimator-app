@@ -1,0 +1,50 @@
+{
+  "plan": {
+    "unit": "mm",
+    "polygon": {
+      "outer": [
+        { "xMm": 0, "yMm": 0 },
+        { "xMm": 2000, "yMm": 0 },
+        { "xMm": 2000, "yMm": 1000 },
+        { "xMm": 0, "yMm": 1000 }
+      ]
+    },
+    "boardWidthMm": 140,
+    "deckingDirectionDeg": 0,
+    "stairs": {
+      "enabled": true,
+      "footprintPolygon": {
+        "outer": [
+          { "xMm": 0, "yMm": -300 },
+          { "xMm": 1000, "yMm": -300 },
+          { "xMm": 1000, "yMm": 0 },
+          { "xMm": 0, "yMm": 0 }
+        ]
+      },
+      "widthMm": 1000,
+      "totalRiseMm": 450,
+      "sideCladding": true
+    }
+  },
+  "product": {
+    "id": "DN34",
+    "name": "DN34",
+    "stockLengthMm": 3000,
+    "widthOptionsMm": [95, 120, 140, 150],
+    "thicknessMm": 25,
+    "gapMm": 5,
+    "fasteningModes": ["clip", "screw"]
+  },
+  "rules": {
+    "mode": "consumer",
+    "gapMm": 5,
+    "secondarySpacingMm": 400,
+    "primarySpacingMm": 600,
+    "anchorSpacingMm": 1000,
+    "footingSpacingMm": 1000,
+    "consumerLoss": { "base": 0.03, "vertexFactor": 0.003, "cutoutFactor": 0.005, "cap": 0.06 },
+    "screwPerIntersection": 2,
+    "showAdvancedOverrides": false,
+    "enableCutPlan": false
+  }
+}
