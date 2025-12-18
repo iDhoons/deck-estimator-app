@@ -19,5 +19,15 @@ export const ko = {
   lossRate: "로스율",
 
   unitM2: "m²",
-  unitPcs: "장"
+  unitPcs: "장",
+
+  section: {
+    cutPlan: "컷플랜(전문가 모드)"
+  },
+  label: {
+    row: "행",
+    required: "필요 길이",
+    stockLen: "원장 길이",
+    offcut: "오프컷(재사용)"
+  }
 } as const;

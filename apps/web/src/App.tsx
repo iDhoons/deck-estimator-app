@@ -5,9 +5,15 @@ import {
   type FasteningMode,
   type Plan,
   type Product,
-  type Ruleset
+  type Ruleset,
 } from "@deck/core";
 import { t } from "./i18n";
+import { CutPlanView } from "./components/CutPlanView";
+import { DeckCanvas, type ViewMode } from "./components/DeckCanvas";
+import { ControlsPanel } from "./components/ControlSpanel";
+import { ResultsPanel } from "./components/ResultsPanel";
+
+type Mode = "consumer" | "pro";
 
 const product: Product = {
   id: "DN34",
@@ -16,7 +22,7 @@ const product: Product = {
   widthOptionsMm: [95, 120, 140, 150],
   thicknessMm: 25,
   gapMm: 5,
-  fasteningModes: ["clip", "screw"]
+  fasteningModes: ["clip", "screw"],
 };
 
 const plan: Plan = {
@@ -26,8 +32,8 @@ const plan: Plan = {
       { xMm: 0, yMm: 0 },
       { xMm: 2000, yMm: 0 },
       { xMm: 2000, yMm: 1000 },
-      { xMm: 0, yMm: 1000 }
-    ]
+      { xMm: 0, yMm: 1000 },
+    ],
   },
   boardWidthMm: 140,
   deckingDirectionDeg: 0,
@@ -38,10 +44,10 @@ const plan: Plan = {
         { xMm: 0, yMm: 1000 },
         { xMm: 1000, yMm: 1000 },
         { xMm: 1000, yMm: 1300 },
-        { xMm: 0, yMm: 1300 }
-      ]
-    }
-  }
+        { xMm: 0, yMm: 1300 },
+      ],
+    },
+  },
 };
 
 const baseRules: Omit<Ruleset, "mode"> = {
@@ -53,87 +59,122 @@ const baseRules: Omit<Ruleset, "mode"> = {
   consumerLoss: { base: 0.03, vertexFactor: 0.003, cutoutFactor: 0.005, cap: 0.06 },
   screwPerIntersection: 2,
   showAdvancedOverrides: false,
-  enableCutPlan: false
+  enableCutPlan: false,
 };
 
-function App() {
-  const [mode, setMode] = useState<"consumer" | "pro">("consumer");
+export default function App() {
+  // --- State
+  const [mode, setMode] = useState<Mode | null>(null);
+  const effectiveMode: Mode = mode ?? "consumer";
   const [fastening, setFastening] = useState<FasteningMode>("clip");
+  const [proViewMode, setProViewMode] = useState<ViewMode>("deck");
+  const [showResults, setShowResults] = useState(false);
 
-  const rules: Ruleset = useMemo(() => ({ ...baseRules, mode }), [mode]);
+  // --- Derived
+  const rules: Ruleset = useMemo(
+    () => ({ ...baseRules, mode: effectiveMode }),
+    [effectiveMode]
+  );
 
   const out = useMemo(() => {
     return calculateQuantities(plan, product, rules, fastening);
   }, [rules, fastening]);
 
   const cutPlan = useMemo(() => {
-    if (mode !== "pro") return null;
+    if (effectiveMode !== "pro") return null;
     return buildCutPlan(plan, product, rules);
-  }, [mode, rules]);
+  }, [effectiveMode, rules]);
 
-  return (
-    <div style={{ padding: 24, fontFamily: "system-ui", maxWidth: 1000 }}>
-      <h1 style={{ marginBottom: 12 }}>{t.appTitle}</h1>
+  const viewMode: ViewMode = effectiveMode === "pro" ? proViewMode : "deck";
 
-      <div style={{ display: "flex", gap: 12, flexWrap: "wrap", marginBottom: 16 }}>
-        <div style={{ padding: 12, border: "1px solid #333", borderRadius: 10 }}>
-          <div style={{ fontSize: 12, opacity: 0.8, marginBottom: 6 }}>{t.mode}</div>
-          <label style={{ marginRight: 10 }}>
-            <input type="radio" name="mode" checked={mode === "consumer"} onChange={() => setMode("consumer")} />{" "}
-            {t.consumer} ({t.consumerDesc})
-          </label>
-          <label>
-            <input type="radio" name="mode" checked={mode === "pro"} onChange={() => setMode("pro")} />{" "}
-            {t.pro} ({t.proDesc})
-          </label>
-        </div>
+  // --- Gate screen
+  if (mode === null) {
+    return (
+      <div style={{ padding: 24, maxWidth: 720, margin: "0 auto" }}>
+        <h1 style={{ margin: "0 0 8px" }}>{t.appTitle}</h1>
+        <p style={{ margin: "0 0 16px", opacity: 0.8 }}>시작 모드를 선택하세요.</p>
 
-        <div style={{ padding: 12, border: "1px solid #333", borderRadius: 10 }}>
-          <div style={{ fontSize: 12, opacity: 0.8, marginBottom: 6 }}>{t.fastening}</div>
-          <label style={{ marginRight: 10 }}>
-            <input type="radio" name="fastening" checked={fastening === "clip"} onChange={() => setFastening("clip")} />{" "}
-            {t.clip}
-          </label>
-          <label>
-            <input type="radio" name="fastening" checked={fastening === "screw"} onChange={() => setFastening("screw")} />{" "}
-            {t.screw}
-          </label>
-        </div>
+        <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
+          <button
+            onClick={() => setMode("consumer")}
+            style={{
+              padding: "12px 16px",
+              borderRadius: 10,
+              border: "1px solid #333",
+              background: "#fff",
+              color: "#111",
+              cursor: "pointer",
+              fontWeight: 700,
+            }}
+          >
+            일반 모드로 시작
+          </button>
 
-        <div style={{ padding: 12, border: "1px solid #333", borderRadius: 10 }}>
-          <div style={{ fontSize: 12, opacity: 0.8, marginBottom: 6 }}>{t.summary}</div>
-          <div>
-            {t.totalArea}: <b>{out.area.totalM2.toFixed(2)} {t.unitM2}</b>
-          </div>
-          <div>
-            {t.deckArea}: <b>{out.area.deckM2.toFixed(2)} {t.unitM2}</b>
-          </div>
-          <div>
-            {t.stairsArea}: <b>{out.area.stairsM2.toFixed(2)} {t.unitM2}</b>
-          </div>
-          <div>
-            {t.boards}: <b>{out.boards.pieces}</b> {t.unitPcs}
-          </div>
-          <div>
-            {t.lossRate}: <b>{(out.boards.lossRateApplied ?? 0).toFixed(3)}</b>
-          </div>
+          <button
+            onClick={() => setMode("pro")}
+            style={{
+              padding: "12px 16px",
+              borderRadius: 10,
+              border: "1px solid #333",
+              background: "#fff",
+              color: "#111",
+              cursor: "pointer",
+              fontWeight: 700,
+            }}
+          >
+            전문가 모드로 시작
+          </button>
         </div>
       </div>
+    );
+  }
 
-      {mode === "pro" && cutPlan && (
-        <div style={{ marginBottom: 16 }}>
-          <div style={{ marginBottom: 8, fontWeight: 700 }}>컷플랜(전문가 모드)</div>
-          <pre style={{ background: "#111", color: "#6cf", padding: 12, borderRadius: 8, overflow: "auto" }}>
-            {JSON.stringify(cutPlan, null, 2)}
-          </pre>
-        </div>
-      )}
+  // --- Main screen
+  return (
+    <div style={{ padding: 24, maxWidth: 1100, margin: "0 auto" }}>
+      <div style={{ color: "red", fontSize: 18, fontWeight: 700, marginBottom: 8 }}>
+        RENDER TEST (보이면 CSS/렌더 OK)
+      </div>
 
-      <pre style={{ background: "#111", color: "#0f0", padding: 12, borderRadius: 8, overflow: "auto" }}>
-        {JSON.stringify(out, null, 2)}
-      </pre>
+      <h1 style={{ margin: "0 0 12px" }}>{t.appTitle}</h1>
+
+      <ControlsPanel
+        effectiveMode={effectiveMode}
+        fastening={fastening}
+        setFastening={setFastening}
+        proViewMode={proViewMode}
+        setProViewMode={setProViewMode}
+        t={t}
+      />
+
+      <div style={{ marginBottom: 16 }}>
+        <DeckCanvas polygon={plan.polygon} viewMode={viewMode} />
+      </div>
+
+      <div style={{ marginBottom: 16 }}>
+        <button
+          onClick={() => setShowResults(v => !v)}
+          style={{
+            padding: "10px 16px",
+            borderRadius: 8,
+            border: "1px solid #333",
+            background: "#fff",
+            color: "#111",
+            cursor: "pointer",
+            fontWeight: 600,
+          }}
+        >
+          {showResults ? "결과 닫기" : "결과 보기"}
+        </button>
+      </div>
+
+<ResultsPanel
+  show={showResults}
+  onClose={() => setShowResults(false)}
+  effectiveMode={effectiveMode}
+  out={out}
+  cutPlan={cutPlan}
+/>
     </div>
   );
 }
-
-export default App;
