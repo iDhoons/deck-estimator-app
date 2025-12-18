@@ -1,9 +1,10 @@
-import { useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import {
   calculateQuantities,
   buildCutPlan,
   type FasteningMode,
   type Plan,
+  type Polygon,
   type Product,
   type Ruleset,
 } from "@deck/core";
@@ -25,7 +26,7 @@ const product: Product = {
   fasteningModes: ["clip", "screw"],
 };
 
-const plan: Plan = {
+const initialPlan: Plan = {
   unit: "mm",
   polygon: {
     outer: [
@@ -64,11 +65,20 @@ const baseRules: Omit<Ruleset, "mode"> = {
 
 export default function App() {
   // --- State
+  const [plan, setPlan] = useState<Plan>(initialPlan);
   const [mode, setMode] = useState<Mode | null>(null);
   const effectiveMode: Mode = mode ?? "consumer";
   const [fastening, setFastening] = useState<FasteningMode>("clip");
   const [proViewMode, setProViewMode] = useState<ViewMode>("deck");
   const [showResults, setShowResults] = useState(false);
+
+  // --- Handlers
+  const handlePolygonChange = useCallback(
+    (updatedPolygon: Polygon) => {
+      setPlan((prev) => ({ ...prev, polygon: updatedPolygon }));
+    },
+    []
+  );
 
   // --- Derived
   const rules: Ruleset = useMemo(
@@ -78,52 +88,69 @@ export default function App() {
 
   const out = useMemo(() => {
     return calculateQuantities(plan, product, rules, fastening);
-  }, [rules, fastening]);
+  }, [plan, rules, fastening]);
 
   const cutPlan = useMemo(() => {
     if (effectiveMode !== "pro") return null;
     return buildCutPlan(plan, product, rules);
-  }, [effectiveMode, rules]);
+  }, [effectiveMode, plan, rules]);
 
   const viewMode: ViewMode = effectiveMode === "pro" ? proViewMode : "deck";
 
   // --- Gate screen
   if (mode === null) {
     return (
-      <div style={{ padding: 24, maxWidth: 720, margin: "0 auto" }}>
-        <h1 style={{ margin: "0 0 8px" }}>{t.appTitle}</h1>
-        <p style={{ margin: "0 0 16px", opacity: 0.8 }}>시작 모드를 선택하세요.</p>
+      <div
+        style={{
+          minHeight: "100vh",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          padding: 24,
+        }}
+      >
+        <div style={{ width: "100%", maxWidth: 720, textAlign: "center" }}>
+          <h1 style={{ margin: "0 0 8px" }}>{t.appTitle}</h1>
+          <p style={{ margin: "0 0 16px", opacity: 0.8 }}>시작 모드를 선택하세요.</p>
 
-        <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
-          <button
-            onClick={() => setMode("consumer")}
+          <div
             style={{
-              padding: "12px 16px",
-              borderRadius: 10,
-              border: "1px solid #333",
-              background: "#fff",
-              color: "#111",
-              cursor: "pointer",
-              fontWeight: 700,
+              display: "flex",
+              gap: 12,
+              flexWrap: "wrap",
+              justifyContent: "center",
             }}
           >
-            일반 모드로 시작
-          </button>
+            <button
+              onClick={() => setMode("consumer")}
+              style={{
+                padding: "12px 16px",
+                borderRadius: 10,
+                border: "1px solid #333",
+                background: "#fff",
+                color: "#111",
+                cursor: "pointer",
+                fontWeight: 700,
+              }}
+            >
+              일반 모드로 시작
+            </button>
 
-          <button
-            onClick={() => setMode("pro")}
-            style={{
-              padding: "12px 16px",
-              borderRadius: 10,
-              border: "1px solid #333",
-              background: "#fff",
-              color: "#111",
-              cursor: "pointer",
-              fontWeight: 700,
-            }}
-          >
-            전문가 모드로 시작
-          </button>
+            <button
+              onClick={() => setMode("pro")}
+              style={{
+                padding: "12px 16px",
+                borderRadius: 10,
+                border: "1px solid #333",
+                background: "#fff",
+                color: "#111",
+                cursor: "pointer",
+                fontWeight: 700,
+              }}
+            >
+              전문가 모드로 시작
+            </button>
+          </div>
         </div>
       </div>
     );
@@ -148,12 +175,16 @@ export default function App() {
       />
 
       <div style={{ marginBottom: 16 }}>
-        <DeckCanvas polygon={plan.polygon} viewMode={viewMode} />
+        <DeckCanvas
+          polygon={plan.polygon}
+          viewMode={viewMode}
+          onChangePolygon={handlePolygonChange}
+        />
       </div>
 
       <div style={{ marginBottom: 16 }}>
         <button
-          onClick={() => setShowResults(v => !v)}
+          onClick={() => setShowResults((v) => !v)}
           style={{
             padding: "10px 16px",
             borderRadius: 8,
@@ -168,13 +199,13 @@ export default function App() {
         </button>
       </div>
 
-<ResultsPanel
-  show={showResults}
-  onClose={() => setShowResults(false)}
-  effectiveMode={effectiveMode}
-  out={out}
-  cutPlan={cutPlan}
-/>
+      <ResultsPanel
+        show={showResults}
+        onClose={() => setShowResults(false)}
+        effectiveMode={effectiveMode}
+        out={out}
+        cutPlan={cutPlan}
+      />
     </div>
   );
 }
