@@ -1,5 +1,6 @@
 import {
   useCallback,
+  useEffect,
   useMemo,
   useRef,
   useState,
@@ -113,7 +114,7 @@ export function DeckCanvas({
   const [isEdgeDragging, setIsEdgeDragging] = useState(false);
   const [cursorPosition, setCursorPosition] = useState<{ x: number; y: number } | null>(null);
   const [isFreePolygonClosed, setIsFreePolygonClosed] = useState(false);
-  const [activeTool, setActiveTool] = useState<"add" | "delete">("add");
+  const [activeTool, setActiveTool] = useState<"add" | "delete" | null>(null);
   const [hoverAddEdgeIndex, setHoverAddEdgeIndex] = useState<number | null>(null);
   const [hoverAddPoint, setHoverAddPoint] = useState<{ x: number; y: number } | null>(null);
 
@@ -155,10 +156,40 @@ export function DeckCanvas({
   }, []);
 
   const centerView = useCallback(() => {
-    setViewBox({ x: 0, y: 0, w: VIEWBOX.width, h: VIEWBOX.height });
+    // Calculate polygon bounding box
+    if (polygon.outer.length === 0) {
+      setViewBox({ x: 0, y: 0, w: VIEWBOX.width, h: VIEWBOX.height });
+      setScale(1);
+      setRotation(0);
+      return;
+    }
+
+    const xs = polygon.outer.map((p) => p.xMm);
+    const ys = polygon.outer.map((p) => p.yMm);
+    const minX = Math.min(...xs);
+    const maxX = Math.max(...xs);
+    const minY = Math.min(...ys);
+    const maxY = Math.max(...ys);
+
+    const polygonWidth = maxX - minX;
+    const polygonHeight = maxY - minY;
+    const polygonCenterX = (minX + maxX) / 2;
+    const polygonCenterY = (minY + maxY) / 2;
+
+    // Add padding (20% on each side)
+    const padding = 1.4;
+    const newWidth = Math.max(polygonWidth * padding, 400);
+    const newHeight = Math.max(polygonHeight * padding, 400);
+
+    setViewBox({
+      x: polygonCenterX - newWidth / 2,
+      y: polygonCenterY - newHeight / 2,
+      w: newWidth,
+      h: newHeight,
+    });
     setScale(1);
     setRotation(0);
-  }, []);
+  }, [polygon.outer]);
 
   const controls = [
     { key: "rotate", label: "회전", onClick: () => setRotation((prev) => (prev + 15) % 360) },
@@ -198,6 +229,26 @@ export function DeckCanvas({
     if (!enableEdgeControls) return [];
     return collectEdgeHandles(polygon.outer);
   }, [enableEdgeControls, polygon.outer]);
+
+  // Calculate angle between edge and horizontal for active edge
+  const activeEdgeAngle = useMemo(() => {
+    if (!activeEdgeId || !isEdgeDragging) return null;
+    const handle = edgeHandles.find((h) => h.id === activeEdgeId);
+    if (!handle) return null;
+
+    const dx = handle.end.x - handle.start.x;
+    const dy = handle.end.y - handle.start.y;
+    const angleRad = Math.atan2(dy, dx);
+    const angleDeg = (angleRad * 180) / Math.PI;
+
+    return {
+      angle: angleDeg,
+      midpoint: {
+        x: (handle.start.x + handle.end.x) / 2,
+        y: (handle.start.y + handle.end.y) / 2,
+      },
+    };
+  }, [activeEdgeId, isEdgeDragging, edgeHandles]);
 
   const roundedPath = useMemo(() => {
     if (!isRoundedEnabled || cornerRadiusMm <= 0) return null;
@@ -639,6 +690,30 @@ export function DeckCanvas({
     setScale((prev) => Math.min(5, Math.max(0.2, prev * factor)));
   }, []);
 
+  // Auto-center view when polygon changes (on mount or shape type change)
+  useEffect(() => {
+    if (polygon.outer.length > 0) {
+      centerView();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [shapeType]); // Only trigger on shape type change
+
+  // ESC key handler to exit edit mode
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape" && activeTool !== null) {
+        setActiveTool(null);
+        setHoverAddEdgeIndex(null);
+        setHoverAddPoint(null);
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => {
+      window.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [activeTool]);
+
   const handleSvgPointerDown = useCallback(
     (event: ReactPointerEvent<SVGSVGElement>) => {
       // In delete mode, clicking the canvas should not add points; let drag handlers handle deletions.
@@ -653,6 +728,21 @@ export function DeckCanvas({
 
   return (
     <div style={{ position: "relative", width: "100%", height: "100%" }}>
+      {/* Dim overlay when in edit mode - HTML overlay to cover entire viewport */}
+      {activeTool !== null && (
+        <div
+          style={{
+            position: "absolute",
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            backgroundColor: "rgba(0, 0, 0, 0.15)",
+            pointerEvents: "none",
+            zIndex: 1,
+          }}
+        />
+      )}
       <svg
         ref={svgRef}
         width="100%"
@@ -686,9 +776,11 @@ export function DeckCanvas({
           {roundedPath ? (
             <path
               d={roundedPath}
-              fill={isSubView ? "none" : "rgba(80,160,255,0.12)"}
+              fill={isSubView ? "none" : (isEdgeDragging || activeTool !== null) ? "#ffffff" : "rgba(80,160,255,0.12)"}
               stroke="#5af"
-              strokeWidth={isSubView ? 4 : 8}
+              strokeWidth={isSubView ? 2 : 4}
+              strokeLinejoin="miter"
+              strokeLinecap="square"
               opacity={isSubView ? 0.2 : 1}
               pointerEvents="all"
             />
@@ -698,7 +790,9 @@ export function DeckCanvas({
               points={polygon.outer.map((p) => `${p.xMm},${p.yMm}`).join(" ")}
               fill="none"
               stroke="#5af"
-              strokeWidth={8}
+              strokeWidth={4}
+              strokeLinejoin="miter"
+              strokeLinecap="square"
               opacity={1}
               pointerEvents="all"
             />
@@ -706,9 +800,11 @@ export function DeckCanvas({
             // All other shapes or closed free polygon: render as filled polygon
             <polygon
               points={polygon.outer.map((p) => `${p.xMm},${p.yMm}`).join(" ")}
-              fill={isSubView ? "none" : "rgba(80,160,255,0.12)"}
+              fill={isSubView ? "none" : (isEdgeDragging || activeTool !== null) ? "#ffffff" : "rgba(80,160,255,0.12)"}
               stroke="#5af"
-              strokeWidth={isSubView ? 4 : 8}
+              strokeWidth={isSubView ? 2 : 4}
+              strokeLinejoin="miter"
+              strokeLinecap="square"
               opacity={isSubView ? 0.2 : 1}
               pointerEvents="all"
             />
@@ -716,20 +812,18 @@ export function DeckCanvas({
 
           {enableEdgeControls &&
             edgeHandles.map((handle) => {
-              const isActive = hoverEdgeId === handle.id || activeEdgeId === handle.id;
+              const isHovered = hoverEdgeId === handle.id;
               return (
                 <g key={handle.id}>
-                  {isActive && (
-                    <line
-                      x1={handle.start.x}
-                      y1={handle.start.y}
-                      x2={handle.end.x}
-                      y2={handle.end.y}
-                      stroke="#5af"
-                      strokeWidth={14}
-                      pointerEvents="none"
-                    />
-                  )}
+                  <line
+                    x1={handle.start.x}
+                    y1={handle.start.y}
+                    x2={handle.end.x}
+                    y2={handle.end.y}
+                    stroke={isHovered ? "#2463ff" : "rgba(169, 212, 255, 1)"}
+                    strokeWidth={14}
+                    pointerEvents="none"
+                  />
                   <line
                     x1={handle.start.x}
                     y1={handle.start.y}
@@ -788,23 +882,23 @@ export function DeckCanvas({
             />
           ))}
 
-          {(!enableEdgeControls || activeTool === "add") &&
-            polygon.outer.map((point, idx) => (
-              <circle
-                key={`${point.xMm}-${point.yMm}-${idx}`}
-                cx={point.xMm}
-                cy={point.yMm}
-                r={12}
-                fill="#fff"
-                stroke="#2463ff"
-                strokeWidth={2}
-                style={{
-                  cursor: isEditable ? "pointer" : "default",
-                  pointerEvents: isEditable ? "auto" : "none",
-                }}
-                onPointerDown={startDrag(idx)}
-              />
-            ))}
+          {/* Vertex handles - always show for all shapes */}
+          {polygon.outer.map((point, idx) => (
+            <circle
+              key={`vertex-${point.xMm}-${point.yMm}-${idx}`}
+              cx={point.xMm}
+              cy={point.yMm}
+              r={8}
+              fill="#fff"
+              stroke="#2463ff"
+              strokeWidth={2}
+              style={{
+                cursor: isEditable && (!enableEdgeControls || activeTool === "add") ? "pointer" : "default",
+                pointerEvents: isEditable && (!enableEdgeControls || activeTool === "add") ? "auto" : "none",
+              }}
+              onPointerDown={startDrag(idx)}
+            />
+          ))}
 
           {/* Free mode: preview line from last point to cursor (only when not closed) */}
           {shapeType === "free" && !isFreePolygonClosed && polygon.outer.length > 0 && cursorPosition && (
@@ -875,6 +969,34 @@ export function DeckCanvas({
               {edge.text}
             </text>
           ))}
+
+          {/* Angle display during edge dragging */}
+          {activeEdgeAngle && (
+            <g>
+              <rect
+                x={activeEdgeAngle.midpoint.x - 50}
+                y={activeEdgeAngle.midpoint.y - 20}
+                width={100}
+                height={40}
+                fill="rgba(255, 255, 255, 0.95)"
+                stroke="#2463ff"
+                strokeWidth={2}
+                rx={6}
+                pointerEvents="none"
+              />
+              <text
+                x={activeEdgeAngle.midpoint.x}
+                y={activeEdgeAngle.midpoint.y + 6}
+                fontSize={18}
+                fill="#2463ff"
+                fontWeight={700}
+                textAnchor="middle"
+                pointerEvents="none"
+              >
+                {Math.abs(activeEdgeAngle.angle).toFixed(1)}°
+              </text>
+            </g>
+          )}
         </g>
 
         {isSubView && (
@@ -895,6 +1017,45 @@ export function DeckCanvas({
 
       </svg>
 
+      {/* Exit edit mode button - shown only when in edit mode */}
+      {activeTool !== null && (
+        <div
+          style={{
+            position: "absolute",
+            left: "50%",
+            top: 16,
+            transform: "translateX(-50%)",
+            pointerEvents: "auto",
+            zIndex: 2,
+          }}
+        >
+          <button
+            type="button"
+            onClick={() => {
+              setActiveTool(null);
+              setHoverAddEdgeIndex(null);
+              setHoverAddPoint(null);
+            }}
+            style={{
+              padding: "8px 16px",
+              borderRadius: 8,
+              border: "2px solid #2463ff",
+              background: "#fff",
+              color: "#2463ff",
+              fontSize: 14,
+              fontWeight: 600,
+              cursor: "pointer",
+              boxShadow: "0 4px 12px rgba(0,0,0,0.1)",
+              display: "flex",
+              alignItems: "center",
+              gap: 8,
+            }}
+          >
+            편집 모드 닫기 (esc)
+          </button>
+        </div>
+      )}
+
       <div
         style={{
           position: "absolute",
@@ -907,12 +1068,13 @@ export function DeckCanvas({
           borderRadius: 10,
           boxShadow: "0 4px 12px rgba(0,0,0,0.08)",
           pointerEvents: "auto",
+          zIndex: 2,
         }}
       >
         <button
           type="button"
           onClick={() => {
-            setActiveTool("add");
+            setActiveTool((prev) => (prev === "add" ? null : "add"));
             setHoverAddEdgeIndex(null);
             setHoverAddPoint(null);
           }}
@@ -921,10 +1083,11 @@ export function DeckCanvas({
             height: 28,
             padding: "6px 10px",
             borderRadius: 6,
-            border: "1px solid #ccc",
-            background: "#fff",
-            color: "#111",
+            border: activeTool === "add" ? "2px solid #2463ff" : "1px solid #ccc",
+            background: activeTool === "add" ? "#e6f0ff" : "#fff",
+            color: activeTool === "add" ? "#2463ff" : "#111",
             fontSize: 12,
+            fontWeight: activeTool === "add" ? 600 : 400,
             cursor: "pointer",
           }}
         >
@@ -933,7 +1096,7 @@ export function DeckCanvas({
         <button
           type="button"
           onClick={() => {
-            setActiveTool("delete");
+            setActiveTool((prev) => (prev === "delete" ? null : "delete"));
             setHoverAddEdgeIndex(null);
             setHoverAddPoint(null);
           }}
@@ -942,10 +1105,11 @@ export function DeckCanvas({
             height: 28,
             padding: "6px 10px",
             borderRadius: 6,
-            border: "1px solid #ccc",
-            background: "#fff",
+            border: activeTool === "delete" ? "2px solid #c52222" : "1px solid #ccc",
+            background: activeTool === "delete" ? "#ffe6e6" : "#fff",
             color: "#c52222",
             fontSize: 12,
+            fontWeight: activeTool === "delete" ? 600 : 400,
             cursor: "pointer",
           }}
         >
@@ -969,6 +1133,7 @@ export function DeckCanvas({
             borderRadius: 10,
             boxShadow: "0 4px 12px rgba(0,0,0,0.08)",
             pointerEvents: "none",
+            zIndex: 2,
           }}
         >
           {summary.map((edge) => (
@@ -994,6 +1159,7 @@ export function DeckCanvas({
           pointerEvents: "auto",
           maxWidth: "calc(100% - 24px)",
           overflowX: "auto",
+          zIndex: 2,
         }}
       >
         {controls.map((control) => (
