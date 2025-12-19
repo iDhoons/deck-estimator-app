@@ -13,7 +13,7 @@ import { DeckCanvas, type ViewMode } from "./components/DeckCanvas";
 import { ControlsPanel } from "./components/ControlsPanel";
 import { ResultsPanel } from "./components/ResultsPanel";
 import { fitPointsToViewport } from "./geometry/polygon";
-import { getEdgeList } from "./geometry/edges";
+import { EDGE_LENGTH_STEP_MM, getEdgeList, MIN_EDGE_SPAN_MM, updateEdgeLength } from "./geometry/edges";
 
 type Mode = "consumer" | "pro";
 type ShapeType = "rectangle" | "lShape" | "tShape" | "circle" | "free";
@@ -152,29 +152,34 @@ export default function App() {
     setPlan((prev) => ({ ...prev, polygon: updatedPolygon }));
   }, []);
 
-  const applyPresetShape = useCallback((nextShape: ShapeType) => {
-    setShapeType(nextShape);
-    if (nextShape === "free") {
-      // Free drawing mode: start with empty canvas
+  const applyPresetShape = useCallback(
+    (nextShape: ShapeType) => {
+      if (nextShape === shapeType) return;
+
+      setShapeType(nextShape);
+      if (nextShape === "free") {
+        // Free drawing mode: start with empty canvas
+        setPlan((prev) => ({
+          ...prev,
+          polygon: {
+            ...prev.polygon,
+            outer: [],
+          },
+        }));
+        return;
+      }
+      const preset = SHAPE_PRESETS[nextShape];
+      const centered = fitShapeToCanvas(preset.getPoints());
       setPlan((prev) => ({
         ...prev,
         polygon: {
           ...prev.polygon,
-          outer: [],
+          outer: centered,
         },
       }));
-      return;
-    }
-    const preset = SHAPE_PRESETS[nextShape];
-    const centered = fitShapeToCanvas(preset.getPoints());
-    setPlan((prev) => ({
-      ...prev,
-      polygon: {
-        ...prev.polygon,
-        outer: centered,
-      },
-    }));
-  }, []);
+    },
+    [shapeType]
+  );
 
   // --- Derived
   const effectiveMode: Mode = mode ?? "consumer";
@@ -209,10 +214,26 @@ export default function App() {
       edgeList.map((edge) => ({
         id: edge.id,
         label: `${edge.fromLabel}–${edge.toLabel}`,
-        value: `${edge.lengthMm.toFixed(1)} mm`,
+        lengthMm: edge.lengthMm,
+        startIndex: edge.startIndex,
+        endIndex: edge.endIndex,
       })),
     [edgeList]
   );
+
+  const handleEdgeLengthChange = useCallback((startIndex: number, nextLengthMm: number) => {
+    const targetLength = Math.round(nextLengthMm / EDGE_LENGTH_STEP_MM) * EDGE_LENGTH_STEP_MM;
+    let didUpdate = false;
+    setPlan((prev) => {
+      const updatedOuter = updateEdgeLength(prev.polygon.outer, startIndex, targetLength, {
+        minLengthMm: MIN_EDGE_SPAN_MM,
+      });
+      if (!updatedOuter) return prev;
+      didUpdate = true;
+      return { ...prev, polygon: { ...prev.polygon, outer: updatedOuter } };
+    });
+    return didUpdate;
+  }, []);
 
   // --- Gate screen
   if (mode === null) {
@@ -285,15 +306,20 @@ export default function App() {
 
       <div className="app-body">
         <ControlsPanel
-          shapeOptions={shapeOptions}
-          selectedShapeId={shapeType}
-          onSelectShape={(shapeId) => applyPresetShape(shapeId as ShapeType)}
-          dimensions={dimensionItems}
-          isRoundedEnabled={isRoundedEnabled}
-          cornerRadiusMm={cornerRadiusMm}
-          onRadiusChange={setCornerRadiusMm}
-          onToggleRounding={() => setIsRoundedEnabled((v) => !v)}
-          onToggleResults={() => setShowResults((v) => !v)}
+        shapeOptions={shapeOptions}
+        selectedShapeId={shapeType}
+        onSelectShape={(shapeId) => applyPresetShape(shapeId as ShapeType)}
+        dimensions={dimensionItems}
+        onChangeDimensionLength={(edgeId, lengthMm) => {
+          const target = dimensionItems.find((edge) => edge.id === edgeId);
+          if (!target) return false;
+          return handleEdgeLengthChange(target.startIndex, lengthMm);
+        }}
+        isRoundedEnabled={isRoundedEnabled}
+        cornerRadiusMm={cornerRadiusMm}
+        onRadiusChange={setCornerRadiusMm}
+        onToggleRounding={() => setIsRoundedEnabled((v) => !v)}
+        onToggleResults={() => setShowResults((v) => !v)}
           showResults={showResults}
         />
 

@@ -1,4 +1,5 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { EDGE_LENGTH_STEP_MM, MIN_EDGE_SPAN_MM } from "../geometry/edges";
 
 type ShapeOption = {
   id: string;
@@ -8,7 +9,9 @@ type ShapeOption = {
 type DimensionItem = {
   id: string;
   label: string;
-  value: string;
+  lengthMm: number;
+  startIndex: number;
+  endIndex: number;
 };
 
 export function ControlsPanel({
@@ -16,6 +19,7 @@ export function ControlsPanel({
   selectedShapeId,
   onSelectShape,
   dimensions,
+  onChangeDimensionLength,
   isRoundedEnabled,
   cornerRadiusMm,
   onRadiusChange,
@@ -27,6 +31,7 @@ export function ControlsPanel({
   selectedShapeId: string;
   onSelectShape: (id: string) => void;
   dimensions: DimensionItem[];
+  onChangeDimensionLength: (edgeId: string, nextLengthMm: number) => boolean;
   isRoundedEnabled: boolean;
   cornerRadiusMm: number;
   onRadiusChange: (value: number) => void;
@@ -40,6 +45,20 @@ export function ControlsPanel({
     for (const id of sectionIds) initial[id] = id === "floor";
     return initial;
   });
+  const [dimensionInputs, setDimensionInputs] = useState<Record<string, string>>({});
+
+  const formatLength = useMemo(
+    () => (lengthMm: number) => Math.round(lengthMm).toLocaleString("ko-KR"),
+    []
+  );
+
+  useEffect(() => {
+    const nextInputs: Record<string, string> = {};
+    for (const dim of dimensions) {
+      nextInputs[dim.id] = formatLength(dim.lengthMm);
+    }
+    setDimensionInputs(nextInputs);
+  }, [dimensions, formatLength]);
 
   const toggleSection = (id: string) => {
     setOpenMap((prev) => ({ ...prev, [id]: !prev[id] }));
@@ -67,7 +86,53 @@ export function ControlsPanel({
             {dimensions.map((item) => (
               <div key={item.id} className="dimension-item">
                 <span>{item.label}</span>
-                <span>{item.value}</span>
+                <div className="dimension-input-row">
+                  <input
+                    type="text"
+                    inputMode="decimal"
+                    value={dimensionInputs[item.id] ?? ""}
+                    onChange={(e) =>
+                      setDimensionInputs((prev) => ({ ...prev, [item.id]: e.target.value }))
+                    }
+                    onBlur={() => {
+                      const raw = (dimensionInputs[item.id] ?? "").trim();
+                      const parsed = Number(raw.replace(/,/g, ""));
+                      const snapped = Math.round(parsed / EDGE_LENGTH_STEP_MM) * EDGE_LENGTH_STEP_MM;
+                      if (!Number.isFinite(parsed) || snapped <= 0 || snapped < MIN_EDGE_SPAN_MM) {
+                        setDimensionInputs((prev) => ({
+                          ...prev,
+                          [item.id]: formatLength(item.lengthMm),
+                        }));
+                        return;
+                      }
+                      const ok = onChangeDimensionLength(item.id, snapped);
+                      if (!ok) {
+                        setDimensionInputs((prev) => ({
+                          ...prev,
+                          [item.id]: formatLength(item.lengthMm),
+                        }));
+                        return;
+                      }
+                      setDimensionInputs((prev) => ({
+                        ...prev,
+                        [item.id]: formatLength(snapped),
+                      }));
+                    }}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") {
+                        e.currentTarget.blur();
+                      } else if (e.key === "Escape") {
+                        setDimensionInputs((prev) => ({
+                          ...prev,
+                          [item.id]: formatLength(item.lengthMm),
+                        }));
+                        e.currentTarget.blur();
+                      }
+                    }}
+                    className="dimension-input"
+                  />
+                  <span className="dimension-unit">mm</span>
+                </div>
               </div>
             ))}
           </div>

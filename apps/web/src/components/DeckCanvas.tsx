@@ -1,6 +1,5 @@
 import {
   useCallback,
-  useEffect,
   useMemo,
   useRef,
   useState,
@@ -39,6 +38,18 @@ const DIAGONALS = [
 
 function snapToGrid(value: number, gridSize: number): number {
   return Math.round(value / gridSize) * gridSize;
+}
+
+function projectPointToSegment(
+  point: { x: number; y: number },
+  a: { x: number; y: number },
+  b: { x: number; y: number }
+) {
+  const ab = { x: b.x - a.x, y: b.y - a.y };
+  const abLenSq = ab.x * ab.x + ab.y * ab.y;
+  if (abLenSq < EPS) return a;
+  const t = Math.max(0, Math.min(1, ((point.x - a.x) * ab.x + (point.y - a.y) * ab.y) / abLenSq));
+  return { x: a.x + ab.x * t, y: a.y + ab.y * t };
 }
 
 function buildRoundedPath(points: { xMm: number; yMm: number }[], radius: number) {
@@ -90,7 +101,6 @@ export function DeckCanvas({
   const pointerIdRef = useRef<number | null>(null);
   const [dragIndex, setDragIndex] = useState<number | null>(null);
   const [viewBox, setViewBox] = useState({ x: 0, y: 0, w: VIEWBOX.width, h: VIEWBOX.height });
-  const [containerSize, setContainerSize] = useState({ width: VIEWBOX.width, height: VIEWBOX.height });
   const panPointerIdRef = useRef<number | null>(null);
   const panStartClientRef = useRef<{ x: number; y: number } | null>(null);
   const panStartViewBoxRef = useRef<{ x: number; y: number } | null>(null);
@@ -103,10 +113,13 @@ export function DeckCanvas({
   const [isEdgeDragging, setIsEdgeDragging] = useState(false);
   const [cursorPosition, setCursorPosition] = useState<{ x: number; y: number } | null>(null);
   const [isFreePolygonClosed, setIsFreePolygonClosed] = useState(false);
+  const [activeTool, setActiveTool] = useState<"add" | "delete">("add");
+  const [hoverAddEdgeIndex, setHoverAddEdgeIndex] = useState<number | null>(null);
+  const [hoverAddPoint, setHoverAddPoint] = useState<{ x: number; y: number } | null>(null);
 
-  // Reset closed state when shape type changes or polygon becomes empty
+  // Reset closed state only when shape type changes
   const prevShapeTypeRef = useRef(shapeType);
-  if (prevShapeTypeRef.current !== shapeType || polygon.outer.length === 0) {
+  if (prevShapeTypeRef.current !== shapeType) {
     prevShapeTypeRef.current = shapeType;
     if (isFreePolygonClosed) {
       setIsFreePolygonClosed(false);
@@ -128,23 +141,6 @@ export function DeckCanvas({
 
   const enableEdgeControls =
     isEditable && (shapeType === "rectangle" || shapeType === "lShape" || shapeType === "tShape");
-
-  // Track container size for responsive positioning
-  useEffect(() => {
-    const svg = svgRef.current;
-    if (!svg) return;
-
-    const updateSize = () => {
-      const rect = svg.getBoundingClientRect();
-      setContainerSize({ width: rect.width, height: rect.height });
-    };
-
-    updateSize();
-    const resizeObserver = new ResizeObserver(updateSize);
-    resizeObserver.observe(svg);
-
-    return () => resizeObserver.disconnect();
-  }, []);
 
   const toSvgCoords = useCallback((clientX: number, clientY: number) => {
     const svg = svgRef.current;
@@ -208,6 +204,16 @@ export function DeckCanvas({
     const d = buildRoundedPath(polygon.outer, cornerRadiusMm);
     return d || null;
   }, [cornerRadiusMm, isRoundedEnabled, polygon.outer]);
+
+  const addHandles = useMemo(() => {
+    if (!isEditable || activeTool !== "add") return [];
+    if (hoverAddEdgeIndex === null || !hoverAddPoint) return [];
+    const pts = polygon.outer;
+    if (pts.length < 2) return [];
+    const i = hoverAddEdgeIndex % pts.length;
+    const nextIndex = (i + 1) % pts.length;
+    return [{ id: `add-handle-${i}`, insertIndex: nextIndex, position: hoverAddPoint }];
+  }, [activeTool, hoverAddEdgeIndex, hoverAddPoint, isEditable, polygon.outer]);
 
   const geometry = useMemo(() => {
     const pts = polygon.outer;
@@ -286,7 +292,7 @@ export function DeckCanvas({
         y: (start.yMm + end.yMm) / 2,
       };
       let normal =
-        orientation >= 0 ? normalize({ x: dy, y: -dx }) : normalize({ x: -dy, y: dx });
+        orientation >= 0 ? normalize({ x: -dy, y: dx }) : normalize({ x: dy, y: -dx });
       if (Math.abs(normal.x) < EPS && Math.abs(normal.y) < EPS) {
         normal = { x: 0, y: -1 };
       }
@@ -315,7 +321,7 @@ export function DeckCanvas({
       const outsideBounds = (pos: { x: number; y: number }) =>
         pos.x < bounds.minX || pos.x > bounds.maxX || pos.y < bounds.minY || pos.y > bounds.maxY;
 
-      if (isPointInsidePolygon(labelPos, pts) || outsideBounds(labelPos)) {
+      if (!isPointInsidePolygon(labelPos, pts) || outsideBounds(labelPos)) {
         offsetDir = { x: -offsetDir.x, y: -offsetDir.y };
         labelPos = adjustPosition();
       }
@@ -350,7 +356,7 @@ export function DeckCanvas({
   const handlePointerMove = useCallback(
     (event: ReactPointerEvent<SVGSVGElement>) => {
       // Update cursor position for free mode preview
-      if (shapeType === "free" && polygon.outer.length > 0) {
+      if (shapeType === "free" && !isFreePolygonClosed && polygon.outer.length > 0) {
         const world = toWorldCoords(event.clientX, event.clientY);
         if (world) {
           setCursorPosition({
@@ -416,7 +422,7 @@ export function DeckCanvas({
         });
       }
     },
-    [shapeType, polygon, toWorldCoords, dragIndex, onChangePolygon, viewBox.h, viewBox.w]
+    [shapeType, isFreePolygonClosed, polygon, toWorldCoords, dragIndex, onChangePolygon, viewBox.h, viewBox.w]
   );
 
   const handlePointerUp = useCallback((event: ReactPointerEvent<SVGSVGElement>) => {
@@ -459,7 +465,20 @@ export function DeckCanvas({
 
   const startDrag = useCallback(
     (idx: number) => (event: ReactPointerEvent<SVGCircleElement>) => {
-      if (!isEditable || enableEdgeControls) return;
+      if (!isEditable) return;
+      const allowVertexDrag = !enableEdgeControls || activeTool === "add";
+
+      if (activeTool === "delete") {
+        event.preventDefault();
+        event.stopPropagation();
+        if (!onChangePolygon) return;
+        const nextOuter = polygon.outer.filter((_, i) => i !== idx);
+        setIsFreePolygonClosed(nextOuter.length >= 3 && isFreePolygonClosed);
+        onChangePolygon({ ...polygon, outer: nextOuter });
+        return;
+      }
+
+      if (!allowVertexDrag) return;
 
       // In free mode, if clicking on first vertex with 3+ points, close the polygon instead of dragging
       if (shapeType === "free" && idx === 0 && polygon.outer.length >= 3) {
@@ -479,7 +498,7 @@ export function DeckCanvas({
         console.assert(shapeType === "circle", "Circle drag must remain in circle mode (start)");
       }
     },
-    [enableEdgeControls, isEditable, shapeType, polygon.outer.length]
+    [activeTool, enableEdgeControls, isEditable, isFreePolygonClosed, onChangePolygon, polygon, shapeType]
   );
 
   const startEdgeDrag = useCallback(
@@ -507,10 +526,46 @@ export function DeckCanvas({
     [enableEdgeControls, isEditable, onChangePolygon, polygon.outer, toWorldCoords]
   );
 
+  const updateHoverAddHandle = useCallback(
+    (edgeIndex: number, clientX: number, clientY: number) => {
+      if (activeTool !== "add") return;
+      const world = toWorldCoords(clientX, clientY);
+      if (!world) return;
+      const pts = polygon.outer;
+      const start = pts[edgeIndex];
+      const end = pts[(edgeIndex + 1) % pts.length];
+      const projected = projectPointToSegment(world, { x: start.xMm, y: start.yMm }, { x: end.xMm, y: end.yMm });
+      setHoverAddEdgeIndex(edgeIndex);
+      setHoverAddPoint(projected);
+    },
+    [activeTool, polygon.outer, toWorldCoords]
+  );
+
+  const handleAddHandleClick = useCallback(
+    (insertIndex: number, position: { x: number; y: number }) =>
+      (event: ReactPointerEvent<SVGCircleElement>) => {
+        if (!isEditable || !onChangePolygon) return;
+        event.preventDefault();
+        event.stopPropagation();
+        const newPoint = { xMm: position.x, yMm: position.y };
+        const newOuter = [
+          ...polygon.outer.slice(0, insertIndex),
+          newPoint,
+          ...polygon.outer.slice(insertIndex),
+        ];
+        onChangePolygon({ ...polygon, outer: newOuter });
+        pointerIdRef.current = event.pointerId;
+        svgRef.current?.setPointerCapture?.(event.pointerId);
+        setDragIndex(insertIndex);
+      },
+    [isEditable, onChangePolygon, polygon]
+  );
+
   const handleCanvasClick = useCallback(
     (event: ReactPointerEvent<SVGSVGElement>) => {
       // Only handle clicks in free mode
       if (shapeType !== "free") return;
+      if (isFreePolygonClosed) return;
       if (!isEditable || !onChangePolygon) return;
 
       // Ignore if clicking on edge controls
@@ -550,7 +605,7 @@ export function DeckCanvas({
       const newOuter = [...polygon.outer, snappedPoint];
       onChangePolygon({ ...polygon, outer: newOuter });
     },
-    [shapeType, isEditable, onChangePolygon, isPanning, dragIndex, toWorldCoords, polygon]
+    [shapeType, isFreePolygonClosed, isEditable, onChangePolygon, isPanning, dragIndex, toWorldCoords, polygon]
   );
 
   const startPan = useCallback(
@@ -586,272 +641,382 @@ export function DeckCanvas({
 
   const handleSvgPointerDown = useCallback(
     (event: ReactPointerEvent<SVGSVGElement>) => {
-      // In free mode with left-click, handle as canvas click
-      if (shapeType === "free" && event.button === 0) {
+      // In delete mode, clicking the canvas should not add points; let drag handlers handle deletions.
+      if (activeTool === "add" && shapeType === "free" && !isFreePolygonClosed && event.button === 0) {
         handleCanvasClick(event);
       }
       // Always try to start pan (will be filtered in startPan)
       startPan(event);
     },
-    [shapeType, handleCanvasClick, startPan]
+    [activeTool, shapeType, isFreePolygonClosed, handleCanvasClick, startPan]
   );
 
   return (
-    <svg
-      ref={svgRef}
-      width="100%"
-      height="100%"
-      viewBox={`${viewBox.x} ${viewBox.y} ${viewBox.w} ${viewBox.h}`}
-      style={{
-        border: "1px solid #ddd",
-        background: "#fafafa",
-        display: "block",
-        cursor:
-          isPanning || isEdgeDragging
-            ? "grabbing"
-            : shapeType === "free"
-              ? "crosshair"
-              : "grab",
-        overflow: "visible",
-      }}
-      onPointerDown={handleSvgPointerDown}
-      onPointerMove={handlePointerMove}
-      onPointerUp={handlePointerUp}
-      onPointerLeave={handlePointerUp}
-      onWheel={handleWheel}
-    >
-      <g transform={transformGroup}>
-        {roundedPath ? (
-          <path
-            d={roundedPath}
-            fill={isSubView ? "none" : "rgba(80,160,255,0.12)"}
-            stroke="#5af"
-            strokeWidth={isSubView ? 4 : 8}
-            opacity={isSubView ? 0.2 : 1}
-            pointerEvents="all"
-          />
-        ) : shapeType === "free" && !isFreePolygonClosed ? (
-          // Free mode: render as polyline until closed
-          <polyline
-            points={polygon.outer.map((p) => `${p.xMm},${p.yMm}`).join(" ")}
-            fill="none"
-            stroke="#5af"
-            strokeWidth={8}
-            opacity={1}
-            pointerEvents="all"
-          />
-        ) : (
-          // All other shapes or closed free polygon: render as filled polygon
-          <polygon
-            points={polygon.outer.map((p) => `${p.xMm},${p.yMm}`).join(" ")}
-            fill={isSubView ? "none" : "rgba(80,160,255,0.12)"}
-            stroke="#5af"
-            strokeWidth={isSubView ? 4 : 8}
-            opacity={isSubView ? 0.2 : 1}
-            pointerEvents="all"
-          />
-        )}
+    <div style={{ position: "relative", width: "100%", height: "100%" }}>
+      <svg
+        ref={svgRef}
+        width="100%"
+        height="100%"
+        viewBox={`${viewBox.x} ${viewBox.y} ${viewBox.w} ${viewBox.h}`}
+        style={{
+          border: "1px solid #ddd",
+          background: "#fafafa",
+          display: "block",
+                  cursor:
+                    isPanning || isEdgeDragging
+                      ? "grabbing"
+                      : activeTool === "delete"
+                        ? "not-allowed"
+                        : activeTool === "add"
+                          ? "copy"
+                          : shapeType === "free"
+                            ? isFreePolygonClosed
+                              ? "grab"
+                              : "crosshair"
+                            : "grab",
+          overflow: "visible",
+        }}
+        onPointerDown={handleSvgPointerDown}
+        onPointerMove={handlePointerMove}
+        onPointerUp={handlePointerUp}
+        onPointerLeave={handlePointerUp}
+        onWheel={handleWheel}
+      >
+        <g transform={transformGroup}>
+          {roundedPath ? (
+            <path
+              d={roundedPath}
+              fill={isSubView ? "none" : "rgba(80,160,255,0.12)"}
+              stroke="#5af"
+              strokeWidth={isSubView ? 4 : 8}
+              opacity={isSubView ? 0.2 : 1}
+              pointerEvents="all"
+            />
+          ) : shapeType === "free" && !isFreePolygonClosed ? (
+            // Free mode: render as polyline until closed
+            <polyline
+              points={polygon.outer.map((p) => `${p.xMm},${p.yMm}`).join(" ")}
+              fill="none"
+              stroke="#5af"
+              strokeWidth={8}
+              opacity={1}
+              pointerEvents="all"
+            />
+          ) : (
+            // All other shapes or closed free polygon: render as filled polygon
+            <polygon
+              points={polygon.outer.map((p) => `${p.xMm},${p.yMm}`).join(" ")}
+              fill={isSubView ? "none" : "rgba(80,160,255,0.12)"}
+              stroke="#5af"
+              strokeWidth={isSubView ? 4 : 8}
+              opacity={isSubView ? 0.2 : 1}
+              pointerEvents="all"
+            />
+          )}
 
-        {enableEdgeControls &&
-          edgeHandles.map((handle) => {
-            const isActive = hoverEdgeId === handle.id || activeEdgeId === handle.id;
-            return (
-              <g key={handle.id}>
-                {isActive && (
+          {enableEdgeControls &&
+            edgeHandles.map((handle) => {
+              const isActive = hoverEdgeId === handle.id || activeEdgeId === handle.id;
+              return (
+                <g key={handle.id}>
+                  {isActive && (
+                    <line
+                      x1={handle.start.x}
+                      y1={handle.start.y}
+                      x2={handle.end.x}
+                      y2={handle.end.y}
+                      stroke="#5af"
+                      strokeWidth={14}
+                      pointerEvents="none"
+                    />
+                  )}
                   <line
                     x1={handle.start.x}
                     y1={handle.start.y}
                     x2={handle.end.x}
                     y2={handle.end.y}
-                    stroke="#5af"
-                    strokeWidth={14}
-                    pointerEvents="none"
+                    stroke="transparent"
+                    strokeWidth={28}
+                    pointerEvents="stroke"
+                    data-edge-hit="true"
+                    onPointerEnter={() => setHoverEdgeId(handle.id)}
+                    onPointerLeave={() => {
+                      if (!isEdgeDragging || activeEdgeId !== handle.id) {
+                        setHoverEdgeId((current) => (current === handle.id ? null : current));
+                      }
+                    }}
+                    onPointerDown={startEdgeDrag(handle)}
                   />
-                )}
+                </g>
+              );
+            })}
+
+          {activeTool === "add" &&
+            polygon.outer.map((point, idx) => {
+              const nextIndex = (idx + 1) % polygon.outer.length;
+              return (
                 <line
-                  x1={handle.start.x}
-                  y1={handle.start.y}
-                  x2={handle.end.x}
-                  y2={handle.end.y}
+                  key={`add-hit-${idx}`}
+                  x1={point.xMm}
+                  y1={point.yMm}
+                  x2={polygon.outer[nextIndex].xMm}
+                  y2={polygon.outer[nextIndex].yMm}
                   stroke="transparent"
                   strokeWidth={28}
                   pointerEvents="stroke"
-                  data-edge-hit="true"
-                  onPointerEnter={() => setHoverEdgeId(handle.id)}
+                  onPointerEnter={(e) => updateHoverAddHandle(idx, e.clientX, e.clientY)}
+                  onPointerMove={(e) => updateHoverAddHandle(idx, e.clientX, e.clientY)}
                   onPointerLeave={() => {
-                    if (!isEdgeDragging || activeEdgeId !== handle.id) {
-                      setHoverEdgeId((current) => (current === handle.id ? null : current));
-                    }
+                    setHoverAddEdgeIndex((current) => (current === idx ? null : current));
+                    setHoverAddPoint(null);
                   }}
-                  onPointerDown={startEdgeDrag(handle)}
                 />
-              </g>
-            );
-          })}
+              );
+            })}
 
-        {!enableEdgeControls &&
-          polygon.outer.map((point, idx) => (
+          {addHandles.map((handle) => (
             <circle
-              key={`${point.xMm}-${point.yMm}-${idx}`}
-              cx={point.xMm}
-              cy={point.yMm}
-              r={12}
+              key={handle.id}
+              cx={handle.position.x}
+              cy={handle.position.y}
+              r={10}
               fill="#fff"
               stroke="#2463ff"
               strokeWidth={2}
-              style={{
-                cursor: isEditable ? "pointer" : "default",
-                pointerEvents: isEditable ? "auto" : "none",
-              }}
-              onPointerDown={startDrag(idx)}
+              onPointerDown={handleAddHandleClick(handle.insertIndex, handle.position)}
+              style={{ cursor: "copy" }}
             />
           ))}
 
-        {/* Free mode: preview line from last point to cursor (only when not closed) */}
-        {shapeType === "free" && !isFreePolygonClosed && polygon.outer.length > 0 && cursorPosition && (
-          <>
-            <line
-              x1={polygon.outer[polygon.outer.length - 1].xMm}
-              y1={polygon.outer[polygon.outer.length - 1].yMm}
-              x2={cursorPosition.x}
-              y2={cursorPosition.y}
-              stroke="#2463ff"
-              strokeWidth={2}
-              strokeDasharray="6,4"
-              pointerEvents="none"
-              opacity={0.6}
-            />
-            {/* Show close indicator when near first point */}
-            {polygon.outer.length >= 3 && (() => {
-              const firstPoint = polygon.outer[0];
-              const dx = cursorPosition.x - firstPoint.xMm;
-              const dy = cursorPosition.y - firstPoint.yMm;
-              const distance = Math.sqrt(dx * dx + dy * dy);
-              const CLOSE_THRESHOLD = 50;
-              if (distance <= CLOSE_THRESHOLD) {
-                return (
-                  <circle
-                    cx={firstPoint.xMm}
-                    cy={firstPoint.yMm}
-                    r={CLOSE_THRESHOLD}
-                    fill="none"
-                    stroke="#2463ff"
-                    strokeWidth={2}
-                    strokeDasharray="8,4"
-                    pointerEvents="none"
-                    opacity={0.4}
-                  />
-                );
-              }
-              return null;
-            })()}
-          </>
-        )}
+          {(!enableEdgeControls || activeTool === "add") &&
+            polygon.outer.map((point, idx) => (
+              <circle
+                key={`${point.xMm}-${point.yMm}-${idx}`}
+                cx={point.xMm}
+                cy={point.yMm}
+                r={12}
+                fill="#fff"
+                stroke="#2463ff"
+                strokeWidth={2}
+                style={{
+                  cursor: isEditable ? "pointer" : "default",
+                  pointerEvents: isEditable ? "auto" : "none",
+                }}
+                onPointerDown={startDrag(idx)}
+              />
+            ))}
 
-        {vertexLabels.map((vertex) => (
-          <text
-            key={`corner-${vertex.label}`}
-            x={vertex.position.x}
-            y={vertex.position.y}
-            fontSize={18}
-            fill="#0b2540"
-            fontWeight={600}
-            pointerEvents="none"
-            textAnchor="middle"
-          >
-            {vertex.label}
-          </text>
-        ))}
+          {/* Free mode: preview line from last point to cursor (only when not closed) */}
+          {shapeType === "free" && !isFreePolygonClosed && polygon.outer.length > 0 && cursorPosition && (
+            <>
+              <line
+                x1={polygon.outer[polygon.outer.length - 1].xMm}
+                y1={polygon.outer[polygon.outer.length - 1].yMm}
+                x2={cursorPosition.x}
+                y2={cursorPosition.y}
+                stroke="#2463ff"
+                strokeWidth={2}
+                strokeDasharray="6,4"
+                pointerEvents="none"
+                opacity={0.6}
+              />
+              {/* Show close indicator when near first point */}
+              {polygon.outer.length >= 3 && (() => {
+                const firstPoint = polygon.outer[0];
+                const dx = cursorPosition.x - firstPoint.xMm;
+                const dy = cursorPosition.y - firstPoint.yMm;
+                const distance = Math.sqrt(dx * dx + dy * dy);
+                const CLOSE_THRESHOLD = 50;
+                if (distance <= CLOSE_THRESHOLD) {
+                  return (
+                    <circle
+                      cx={firstPoint.xMm}
+                      cy={firstPoint.yMm}
+                      r={CLOSE_THRESHOLD}
+                      fill="none"
+                      stroke="#2463ff"
+                      strokeWidth={2}
+                      strokeDasharray="8,4"
+                      pointerEvents="none"
+                      opacity={0.4}
+                    />
+                  );
+                }
+                return null;
+              })()}
+            </>
+          )}
 
-        {edgeLabels.map((edge) => (
-          <text
-            key={`edge-label-${edge.id}`}
-            x={edge.position.x}
-            y={edge.position.y}
-            fontSize={18}
-            fill="#0b2540"
-            textAnchor="middle"
-            pointerEvents="none"
-          >
-            {edge.text}
-          </text>
-        ))}
-      </g>
-
-      {isSubView && (
-        <text x={viewBox.x + 20} y={viewBox.y + 30} fill="#555" fontSize={20}>
-          하부 구조 보기
-        </text>
-      )}
-
-      {shapeType === "free" && isEditable && (
-        <text x={viewBox.x + 20} y={viewBox.y + 30} fill="#2463ff" fontSize={16} pointerEvents="none">
-          {isFreePolygonClosed
-            ? `면 완성됨 | 점 개수: ${polygon.outer.length}`
-            : polygon.outer.length >= 3
-              ? `클릭하여 점 추가 | 첫 점 근처 클릭으로 면 완성 | 점 개수: ${polygon.outer.length}`
-              : `클릭하여 점 추가 | 점 개수: ${polygon.outer.length}`}
-        </text>
-      )}
-
-      {summary.length > 0 && (
-        <g
-          pointerEvents="none"
-          transform={`translate(${viewBox.x + containerSize.width / scale - 20} ${viewBox.y + 20})`}
-        >
-          {summary.map((edge, idx) => (
+          {vertexLabels.map((vertex) => (
             <text
-              key={`summary-${edge.id}`}
-              x={0}
-              y={idx * 22}
-              fontSize={16}
+              key={`corner-${vertex.label}`}
+              x={vertex.position.x}
+              y={vertex.position.y}
+              fontSize={18}
               fill="#0b2540"
-              textAnchor="end"
+              fontWeight={600}
+              pointerEvents="none"
+              textAnchor="middle"
+            >
+              {vertex.label}
+            </text>
+          ))}
+
+          {edgeLabels.map((edge) => (
+            <text
+              key={`edge-label-${edge.id}`}
+              x={edge.position.x}
+              y={edge.position.y}
+              fontSize={25}
+              fill="#0b2540"
+              textAnchor="middle"
+              pointerEvents="none"
             >
               {edge.text}
             </text>
           ))}
         </g>
+
+        {isSubView && (
+          <text x={viewBox.x + 20} y={viewBox.y + 30} fill="#555" fontSize={20}>
+            하부 구조 보기
+          </text>
+        )}
+
+        {shapeType === "free" && isEditable && (
+          <text x={viewBox.x + 20} y={viewBox.y + 30} fill="#2463ff" fontSize={16} pointerEvents="none">
+            {isFreePolygonClosed
+              ? `면 완성됨 | 점 개수: ${polygon.outer.length} | 점을 추가하려면 초기화하세요`
+              : polygon.outer.length >= 3
+                ? `클릭하여 점 추가 | 첫 점 근처 클릭으로 면 완성 | 점 개수: ${polygon.outer.length}`
+                : `클릭하여 점 추가 | 점 개수: ${polygon.outer.length}`}
+          </text>
+        )}
+
+      </svg>
+
+      <div
+        style={{
+          position: "absolute",
+          left: 16,
+          top: 16,
+          display: "flex",
+          gap: 8,
+          background: "rgba(255,255,255,0.92)",
+          padding: "8px 10px",
+          borderRadius: 10,
+          boxShadow: "0 4px 12px rgba(0,0,0,0.08)",
+          pointerEvents: "auto",
+        }}
+      >
+        <button
+          type="button"
+          onClick={() => {
+            setActiveTool("add");
+            setHoverAddEdgeIndex(null);
+            setHoverAddPoint(null);
+          }}
+          style={{
+            minWidth: 72,
+            height: 28,
+            padding: "6px 10px",
+            borderRadius: 6,
+            border: "1px solid #ccc",
+            background: "#fff",
+            color: "#111",
+            fontSize: 12,
+            cursor: "pointer",
+          }}
+        >
+          추가
+        </button>
+        <button
+          type="button"
+          onClick={() => {
+            setActiveTool("delete");
+            setHoverAddEdgeIndex(null);
+            setHoverAddPoint(null);
+          }}
+          style={{
+            minWidth: 72,
+            height: 28,
+            padding: "6px 10px",
+            borderRadius: 6,
+            border: "1px solid #ccc",
+            background: "#fff",
+            color: "#c52222",
+            fontSize: 12,
+            cursor: "pointer",
+          }}
+        >
+          삭제
+        </button>
+      </div>
+
+      {summary.length > 0 && (
+        <div
+          style={{
+            position: "absolute",
+            top: 16,
+            right: 16,
+            textAlign: "left",
+              color: "#0b2540",
+              fontSize: 15,
+            fontWeight: 600,
+            lineHeight: 1.2,
+            padding: "10px 12px",
+            background: "rgba(255,255,255,0.9)",
+            borderRadius: 10,
+            boxShadow: "0 4px 12px rgba(0,0,0,0.08)",
+            pointerEvents: "none",
+          }}
+        >
+          {summary.map((edge) => (
+            <div key={`summary-${edge.id}`}>{edge.text}</div>
+          ))}
+        </div>
       )}
 
-      <g
-        pointerEvents="auto"
-        transform={`translate(${viewBox.x + containerSize.width / (2 * scale)} ${viewBox.y + containerSize.height / scale - 50})`}
+      <div
+        style={{
+          position: "absolute",
+          left: "50%",
+          bottom: 16,
+          transform: "translateX(-50%)",
+          display: "flex",
+          gap: 8,
+          flexWrap: "nowrap",
+          justifyContent: "center",
+          padding: "8px 10px",
+          background: "rgba(255,255,255,0.9)",
+          borderRadius: 10,
+          boxShadow: "0 4px 12px rgba(0,0,0,0.08)",
+          pointerEvents: "auto",
+          maxWidth: "calc(100% - 24px)",
+          overflowX: "auto",
+        }}
       >
-        <g transform={`translate(-${(controls.length * 110 + (controls.length - 1) * 8) / 2} 0)`}>
-          {controls.map((control, idx) => {
-            const x = idx * (110 + 8);
-            return (
-              <g
-                key={control.key}
-                transform={`translate(${x} 0)`}
-                style={{ cursor: "pointer" }}
-                onPointerDown={(event) => {
-                  event.stopPropagation();
-                  event.preventDefault();
-                }}
-                onPointerUp={(event) => {
-                  event.stopPropagation();
-                  event.preventDefault();
-                  control.onClick();
-                }}
-              >
-                <rect width={110} height={32} rx={6} fill="#fff" stroke="#ccc" />
-                <text
-                  x={55}
-                  y={20}
-                  fontSize={14}
-                  fill="#333"
-                  textAnchor="middle"
-                  pointerEvents="none"
-                >
-                  {control.label}
-                </text>
-              </g>
-            );
-          })}
-        </g>
-      </g>
-    </svg>
+        {controls.map((control) => (
+          <button
+            key={control.key}
+            onClick={control.onClick}
+            style={{
+              minWidth: 82,
+              height: 27,
+              padding: "6px 10px",
+              borderRadius: 6,
+              border: "1px solid #ccc",
+              background: "#fff",
+              color: "#333",
+              fontSize: 12,
+              cursor: "pointer",
+              boxShadow: "inset 0 1px 0 rgba(255,255,255,0.4)",
+            }}
+          >
+            {control.label}
+          </button>
+        ))}
+      </div>
+    </div>
   );
 }

@@ -1,7 +1,9 @@
 import { indexToLabel, normalize, type PlanPoint } from "./polygon";
 
 const EPS = 1e-3;
-const MIN_EDGE_SPAN_MM = 100;
+export const MIN_EDGE_SPAN_MM = 100;
+export const EDGE_LENGTH_STEP_MM = 10;
+const MIN_EDGE_LENGTH_MM = MIN_EDGE_SPAN_MM;
 
 export type EdgeHandle = {
   id: string;
@@ -11,6 +13,15 @@ export type EdgeHandle = {
   start: { x: number; y: number };
   end: { x: number; y: number };
   vertexIndices: number[];
+};
+
+export type EdgeInfo = {
+  id: string;
+  fromLabel: string;
+  toLabel: string;
+  lengthMm: number;
+  startIndex: number;
+  endIndex: number;
 };
 
 export function collectEdgeHandles(points: PlanPoint[]) {
@@ -105,9 +116,9 @@ export function computeEdgeLimits(
   return { minDelta, maxDelta };
 }
 
-export function getEdgeList(points: PlanPoint[]) {
+export function getEdgeList(points: PlanPoint[]): EdgeInfo[] {
   if (points.length < 2) return [];
-  const edges = [];
+  const edges: EdgeInfo[] = [];
   for (let i = 0; i < points.length; i++) {
     const next = (i + 1) % points.length;
     const from = points[i];
@@ -119,9 +130,72 @@ export function getEdgeList(points: PlanPoint[]) {
       fromLabel: indexToLabel(i),
       toLabel: indexToLabel(next),
       lengthMm: Math.sqrt(dx * dx + dy * dy),
+      startIndex: i,
+      endIndex: next,
     });
   }
   return edges;
+}
+
+export function updateEdgeLength(
+  points: PlanPoint[],
+  startIndex: number,
+  targetLengthMm: number,
+  options?: { minLengthMm?: number }
+) {
+  const n = points.length;
+  const minLength = options?.minLengthMm ?? MIN_EDGE_LENGTH_MM;
+  if (n < 2) return null;
+  if (!Number.isFinite(targetLengthMm) || targetLengthMm <= 0 || targetLengthMm < minLength) {
+    return null;
+  }
+
+  const endIndex = (startIndex + 1) % n;
+  const start = points[startIndex];
+  const end = points[endIndex];
+  const vec = { x: end.xMm - start.xMm, y: end.yMm - start.yMm };
+  const currentLength = Math.hypot(vec.x, vec.y);
+  if (currentLength < EPS) return null;
+
+  const direction = { x: vec.x / currentLength, y: vec.y / currentLength };
+  const nextVec = { x: direction.x * targetLengthMm, y: direction.y * targetLengthMm };
+  const delta = { x: nextVec.x - vec.x, y: nextVec.y - vec.y };
+  if (Math.hypot(delta.x, delta.y) < EPS) return points;
+
+  const forwardIndices: number[] = [];
+  for (let idx = endIndex; idx !== startIndex; idx = (idx + 1) % n) {
+    forwardIndices.push(idx);
+  }
+
+  const backwardIndices: number[] = [];
+  for (let idx = startIndex; idx !== endIndex; idx = (idx + 1) % n) {
+    backwardIndices.push(idx);
+  }
+
+  const candidates = [
+    { indices: forwardIndices, delta },
+    { indices: backwardIndices, delta: { x: -delta.x, y: -delta.y } },
+  ].sort((a, b) => a.indices.length - b.indices.length);
+
+  const isValid = (pts: PlanPoint[]) => {
+    for (let i = 0; i < pts.length; i++) {
+      const next = (i + 1) % pts.length;
+      const dx = pts[next].xMm - pts[i].xMm;
+      const dy = pts[next].yMm - pts[i].yMm;
+      if (Math.hypot(dx, dy) < minLength) return false;
+    }
+    return true;
+  };
+
+  for (const candidate of candidates) {
+    const set = new Set(candidate.indices);
+    const updated = points.map((pt, idx) =>
+      set.has(idx) ? { xMm: pt.xMm + candidate.delta.x, yMm: pt.yMm + candidate.delta.y } : pt
+    );
+    if (isValid(updated)) return updated;
+  }
+
+  return null;
 }
 
 export { normalize };

@@ -37,6 +37,7 @@ export function FreeDrawCanvas({
 
   // Final shapes: completed polygons
   const [finalShapes, setFinalShapes] = useState<Point[][]>([]);
+  const drawingLocked = finalShapes.length > 0;
 
   const centerX = useMemo(() => viewBox.x + viewBox.w / 2, [viewBox]);
   const centerY = useMemo(() => viewBox.y + viewBox.h / 2, [viewBox]);
@@ -100,6 +101,7 @@ export function FreeDrawCanvas({
 
   const handleCanvasClick = useCallback(
     (event: ReactPointerEvent<SVGSVGElement>) => {
+      if (drawingLocked) return;
       if (isPanning) return;
       if (panPointerIdRef.current !== null) return;
 
@@ -134,7 +136,7 @@ export function FreeDrawCanvas({
       // Add point to draft
       setDraftPoints((prev) => [...prev, snappedPoint]);
     },
-    [draftPoints, isPanning, onPolygonComplete, toWorldCoords]
+    [draftPoints, drawingLocked, isPanning, onPolygonComplete, toWorldCoords]
   );
 
   const handlePointerMove = useCallback(
@@ -237,7 +239,7 @@ export function FreeDrawCanvas({
         border: "1px solid #ddd",
         background: "#fafafa",
         display: "block",
-        cursor: isPanning ? "grabbing" : "crosshair",
+        cursor: isPanning ? "grabbing" : drawingLocked ? "not-allowed" : "crosshair",
       }}
       onPointerDown={(e) => {
         if (e.button === 0) {
@@ -412,6 +414,18 @@ export function FreeDrawCanvas({
           pointerEvents="none"
         >
           점 개수: {draftPoints.length}
+        </text>
+      )}
+
+      {drawingLocked && (
+        <text
+          x={viewBox.x + 20}
+          y={viewBox.y + 80}
+          fill="#c00"
+          fontSize={14}
+          pointerEvents="none"
+        >
+          도형이 완성되었습니다. 새로 그리려면 지우기를 눌러주세요.
         </text>
       )}
     </svg>
