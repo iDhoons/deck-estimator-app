@@ -9,12 +9,17 @@ import {
   type Ruleset,
 } from "@deck/core";
 import { t } from "./i18n";
-import { CutPlanView } from "./components/CutPlanView";
 import { DeckCanvas, type ViewMode } from "./components/DeckCanvas";
-import { ControlsPanel } from "./components/ControlSpanel";
+import { ControlsPanel } from "./components/ControlsPanel";
 import { ResultsPanel } from "./components/ResultsPanel";
+import { fitPointsToViewport } from "./geometry/polygon";
+import { getEdgeList } from "./geometry/edges";
 
 type Mode = "consumer" | "pro";
+type ShapeType = "rectangle" | "lShape" | "tShape" | "circle" | "free";
+
+const VIEWBOX_SIZE = { width: 2000, height: 1200 };
+const VIEWBOX_CENTER = { x: VIEWBOX_SIZE.width / 2, y: VIEWBOX_SIZE.height / 2 };
 
 const product: Product = {
   id: "DN34",
@@ -26,7 +31,7 @@ const product: Product = {
   fasteningModes: ["clip", "screw"],
 };
 
-const initialPlan: Plan = {
+const basePlan: Plan = {
   unit: "mm",
   polygon: {
     outer: [
@@ -63,24 +68,107 @@ const baseRules: Omit<Ruleset, "mode"> = {
   enableCutPlan: false,
 };
 
+type ShapePreset = {
+  label: string;
+  getPoints: () => { xMm: number; yMm: number }[];
+};
+
+const SHAPE_PRESETS: Record<Exclude<ShapeType, "free">, ShapePreset> = {
+  rectangle: {
+    label: "직사각형",
+    getPoints: () => [
+      { xMm: 0, yMm: 0 },
+      { xMm: 1000, yMm: 0 },
+      { xMm: 1000, yMm: 600 },
+      { xMm: 0, yMm: 600 },
+    ],
+  },
+  lShape: {
+    label: "ㄱ자형",
+    getPoints: () => [
+      { xMm: 0, yMm: 0 },
+      { xMm: 1800, yMm: 0 },
+      { xMm: 1800, yMm: 500 },
+      { xMm: 700, yMm: 500 },
+      { xMm: 700, yMm: 1400 },
+      { xMm: 0, yMm: 1400 },
+    ],
+  },
+  tShape: {
+    label: "T자형",
+    getPoints: () => [
+      { xMm: 600, yMm: 0 },
+      { xMm: 2200, yMm: 0 },
+      { xMm: 2200, yMm: 400 },
+      { xMm: 1600, yMm: 400 },
+      { xMm: 1600, yMm: 1400 },
+      { xMm: 1200, yMm: 1400 },
+      { xMm: 1200, yMm: 400 },
+      { xMm: 600, yMm: 400 },
+    ],
+  },
+  circle: {
+    label: "원형",
+    getPoints: () => {
+      const radius = 550;
+      const segments = 16;
+      const pts = [];
+      for (let i = 0; i < segments; i++) {
+        const angle = (i / segments) * Math.PI * 2;
+        pts.push({
+          xMm: radius + Math.cos(angle) * radius,
+          yMm: radius + Math.sin(angle) * radius,
+        });
+      }
+      return pts;
+    },
+  },
+};
+
+const fitShapeToCanvas = (points: { xMm: number; yMm: number }[]) =>
+  fitPointsToViewport(points, VIEWBOX_SIZE, VIEWBOX_CENTER, 0.5);
+
+const initialPlan: Plan = {
+  ...basePlan,
+  polygon: {
+    ...basePlan.polygon,
+    outer: fitShapeToCanvas(basePlan.polygon.outer),
+  },
+};
+
 export default function App() {
   // --- State
   const [plan, setPlan] = useState<Plan>(initialPlan);
   const [mode, setMode] = useState<Mode | null>(null);
-  const effectiveMode: Mode = mode ?? "consumer";
-  const [fastening, setFastening] = useState<FasteningMode>("clip");
-  const [proViewMode, setProViewMode] = useState<ViewMode>("deck");
+  const fastening: FasteningMode = "clip";
+  const [viewMode] = useState<ViewMode>("deck");
   const [showResults, setShowResults] = useState(false);
+  const [shapeType, setShapeType] = useState<ShapeType>("rectangle");
+  const [isRoundedEnabled, setIsRoundedEnabled] = useState(false);
+  const [cornerRadiusMm, setCornerRadiusMm] = useState(40);
 
   // --- Handlers
-  const handlePolygonChange = useCallback(
-    (updatedPolygon: Polygon) => {
-      setPlan((prev) => ({ ...prev, polygon: updatedPolygon }));
-    },
-    []
-  );
+  const handlePolygonChange = useCallback((updatedPolygon: Polygon) => {
+    setPlan((prev) => ({ ...prev, polygon: updatedPolygon }));
+  }, []);
+
+  const applyPresetShape = useCallback((nextShape: ShapeType) => {
+    setShapeType(nextShape);
+    if (nextShape === "free") return;
+    const preset = SHAPE_PRESETS[nextShape];
+    const centered = fitShapeToCanvas(preset.getPoints());
+    setPlan((prev) => ({
+      ...prev,
+      polygon: {
+        ...prev.polygon,
+        outer: centered,
+      },
+    }));
+  }, []);
 
   // --- Derived
+  const effectiveMode: Mode = mode ?? "consumer";
+
   const rules: Ruleset = useMemo(
     () => ({ ...baseRules, mode: effectiveMode }),
     [effectiveMode]
@@ -95,7 +183,26 @@ export default function App() {
     return buildCutPlan(plan, product, rules);
   }, [effectiveMode, plan, rules]);
 
-  const viewMode: ViewMode = effectiveMode === "pro" ? proViewMode : "deck";
+  const edgeList = useMemo(() => getEdgeList(plan.polygon.outer), [plan]);
+  const shapeOptions = useMemo(
+    () => [
+      { id: "rectangle", label: SHAPE_PRESETS.rectangle.label },
+      { id: "lShape", label: SHAPE_PRESETS.lShape.label },
+      { id: "tShape", label: SHAPE_PRESETS.tShape.label },
+      { id: "circle", label: SHAPE_PRESETS.circle.label },
+      { id: "free", label: "자유형" },
+    ],
+    []
+  );
+  const dimensionItems = useMemo(
+    () =>
+      edgeList.map((edge) => ({
+        id: edge.id,
+        label: `${edge.fromLabel}–${edge.toLabel}`,
+        value: `${edge.lengthMm.toFixed(1)} mm`,
+      })),
+    [edgeList]
+  );
 
   // --- Gate screen
   if (mode === null) {
@@ -158,45 +265,43 @@ export default function App() {
 
   // --- Main screen
   return (
-    <div style={{ padding: 24, maxWidth: 1100, margin: "0 auto" }}>
-      <div style={{ color: "red", fontSize: 18, fontWeight: 700, marginBottom: 8 }}>
-        RENDER TEST (보이면 CSS/렌더 OK)
-      </div>
+    <div className="app-shell">
+      <header className="app-header">
+        <h1>{t.appTitle}</h1>
+        <div style={{ fontSize: 14, color: "#555" }}>
+          모드: {effectiveMode === "pro" ? "전문가" : "일반"}
+        </div>
+      </header>
 
-      <h1 style={{ margin: "0 0 12px" }}>{t.appTitle}</h1>
-
-      <ControlsPanel
-        effectiveMode={effectiveMode}
-        fastening={fastening}
-        setFastening={setFastening}
-        proViewMode={proViewMode}
-        setProViewMode={setProViewMode}
-        t={t}
-      />
-
-      <div style={{ marginBottom: 16 }}>
-        <DeckCanvas
-          polygon={plan.polygon}
-          viewMode={viewMode}
-          onChangePolygon={handlePolygonChange}
+      <div className="app-body">
+        <ControlsPanel
+          shapeOptions={shapeOptions}
+          selectedShapeId={shapeType}
+          onSelectShape={(shapeId) => applyPresetShape(shapeId as ShapeType)}
+          dimensions={dimensionItems}
+          isRoundedEnabled={isRoundedEnabled}
+          cornerRadiusMm={cornerRadiusMm}
+          onRadiusChange={setCornerRadiusMm}
+          onToggleRounding={() => setIsRoundedEnabled((v) => !v)}
+          onToggleResults={() => setShowResults((v) => !v)}
+          showResults={showResults}
         />
-      </div>
 
-      <div style={{ marginBottom: 16 }}>
-        <button
-          onClick={() => setShowResults((v) => !v)}
-          style={{
-            padding: "10px 16px",
-            borderRadius: 8,
-            border: "1px solid #333",
-            background: "#fff",
-            color: "#111",
-            cursor: "pointer",
-            fontWeight: 600,
-          }}
-        >
-          {showResults ? "결과 닫기" : "결과 보기"}
-        </button>
+        <section className="canvas-pane">
+          <header>데크 캔버스</header>
+          <div className="canvas-surface">
+            <div style={{ flex: 1, display: "flex" }}>
+              <DeckCanvas
+                polygon={plan.polygon}
+                viewMode={viewMode}
+                onChangePolygon={handlePolygonChange}
+                isRoundedEnabled={isRoundedEnabled}
+                cornerRadiusMm={cornerRadiusMm}
+                shapeType={shapeType}
+              />
+            </div>
+          </div>
+        </section>
       </div>
 
       <ResultsPanel

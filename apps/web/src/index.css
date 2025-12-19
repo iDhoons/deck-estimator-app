@@ -1,3 +1,7 @@
+:root {
+  --app-header-height: 44px;
+}
+
 /* 최소한의 안정적인 기본 CSS (센터링/다크모드 템플릿 제거) */
 
 html,
@@ -19,14 +23,15 @@ body {
 }
 
 .app-shell {
-  min-height: 100%;
+  height: 100vh;
   display: flex;
   flex-direction: column;
   overflow: hidden;
 }
 
 .app-header {
-  padding: 16px 24px;
+  min-height: var(--app-header-height);
+  padding: 8px 24px;
   background: #fff;
   border-bottom: 1px solid #d8dfe8;
   display: flex;
@@ -43,6 +48,7 @@ body {
 
 .app-body {
   flex: 1;
+  height: calc(100vh - var(--app-header-height));
   display: grid;
   grid-template-columns: clamp(280px, 26vw, 360px) minmax(0, 1fr);
   gap: 24px;
@@ -62,10 +68,16 @@ body {
   overflow: hidden;
 }
 
+.left-layout {
+  height: 100%;
+  min-height: 0;
+}
+
 .controls-pane-inner {
   padding: 20px;
   overflow-y: auto;
   height: 100%;
+  min-height: 0;
 }
 
 .canvas-pane {
