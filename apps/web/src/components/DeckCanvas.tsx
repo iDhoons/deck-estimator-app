@@ -1,5 +1,6 @@
 import {
   useCallback,
+  useEffect,
   useMemo,
   useRef,
   useState,
@@ -28,12 +29,17 @@ type RoundedPoint = { x: number; y: number };
 
 const VIEWBOX = { width: 2000, height: 1200 };
 const EPS = 1e-3;
+const GRID_SIZE = 100; // 100mm grid for free drawing mode
 const DIAGONALS = [
   { x: Math.SQRT1_2, y: -Math.SQRT1_2 },
   { x: -Math.SQRT1_2, y: -Math.SQRT1_2 },
   { x: Math.SQRT1_2, y: Math.SQRT1_2 },
   { x: -Math.SQRT1_2, y: Math.SQRT1_2 },
 ];
+
+function snapToGrid(value: number, gridSize: number): number {
+  return Math.round(value / gridSize) * gridSize;
+}
 
 function buildRoundedPath(points: { xMm: number; yMm: number }[], radius: number) {
   if (points.length < 2) return "";
@@ -84,6 +90,7 @@ export function DeckCanvas({
   const pointerIdRef = useRef<number | null>(null);
   const [dragIndex, setDragIndex] = useState<number | null>(null);
   const [viewBox, setViewBox] = useState({ x: 0, y: 0, w: VIEWBOX.width, h: VIEWBOX.height });
+  const [containerSize, setContainerSize] = useState({ width: VIEWBOX.width, height: VIEWBOX.height });
   const panPointerIdRef = useRef<number | null>(null);
   const panStartClientRef = useRef<{ x: number; y: number } | null>(null);
   const panStartViewBoxRef = useRef<{ x: number; y: number } | null>(null);
@@ -94,6 +101,17 @@ export function DeckCanvas({
   const [hoverEdgeId, setHoverEdgeId] = useState<string | null>(null);
   const [activeEdgeId, setActiveEdgeId] = useState<string | null>(null);
   const [isEdgeDragging, setIsEdgeDragging] = useState(false);
+  const [cursorPosition, setCursorPosition] = useState<{ x: number; y: number } | null>(null);
+  const [isFreePolygonClosed, setIsFreePolygonClosed] = useState(false);
+
+  // Reset closed state when shape type changes or polygon becomes empty
+  const prevShapeTypeRef = useRef(shapeType);
+  if (prevShapeTypeRef.current !== shapeType || polygon.outer.length === 0) {
+    prevShapeTypeRef.current = shapeType;
+    if (isFreePolygonClosed) {
+      setIsFreePolygonClosed(false);
+    }
+  }
   const edgeDragRef = useRef<{
     pointerId: number;
     handleId: string;
@@ -110,6 +128,23 @@ export function DeckCanvas({
 
   const enableEdgeControls =
     isEditable && (shapeType === "rectangle" || shapeType === "lShape" || shapeType === "tShape");
+
+  // Track container size for responsive positioning
+  useEffect(() => {
+    const svg = svgRef.current;
+    if (!svg) return;
+
+    const updateSize = () => {
+      const rect = svg.getBoundingClientRect();
+      setContainerSize({ width: rect.width, height: rect.height });
+    };
+
+    updateSize();
+    const resizeObserver = new ResizeObserver(updateSize);
+    resizeObserver.observe(svg);
+
+    return () => resizeObserver.disconnect();
+  }, []);
 
   const toSvgCoords = useCallback((clientX: number, clientY: number) => {
     const svg = svgRef.current;
@@ -314,6 +349,17 @@ export function DeckCanvas({
 
   const handlePointerMove = useCallback(
     (event: ReactPointerEvent<SVGSVGElement>) => {
+      // Update cursor position for free mode preview
+      if (shapeType === "free" && polygon.outer.length > 0) {
+        const world = toWorldCoords(event.clientX, event.clientY);
+        if (world) {
+          setCursorPosition({
+            x: snapToGrid(world.x, GRID_SIZE),
+            y: snapToGrid(world.y, GRID_SIZE),
+          });
+        }
+      }
+
       if (circleDragActiveRef.current) {
         console.assert(shapeType === "circle", "Circle drag must remain in circle mode (move)");
       }
@@ -370,7 +416,7 @@ export function DeckCanvas({
         });
       }
     },
-    [dragIndex, onChangePolygon, polygon, toWorldCoords, viewBox.h, viewBox.w]
+    [shapeType, polygon, toWorldCoords, dragIndex, onChangePolygon, viewBox.h, viewBox.w]
   );
 
   const handlePointerUp = useCallback((event: ReactPointerEvent<SVGSVGElement>) => {
@@ -414,6 +460,15 @@ export function DeckCanvas({
   const startDrag = useCallback(
     (idx: number) => (event: ReactPointerEvent<SVGCircleElement>) => {
       if (!isEditable || enableEdgeControls) return;
+
+      // In free mode, if clicking on first vertex with 3+ points, close the polygon instead of dragging
+      if (shapeType === "free" && idx === 0 && polygon.outer.length >= 3) {
+        event.preventDefault();
+        event.stopPropagation();
+        setIsFreePolygonClosed(true);
+        return;
+      }
+
       event.preventDefault();
       event.stopPropagation();
       pointerIdRef.current = event.pointerId;
@@ -424,7 +479,7 @@ export function DeckCanvas({
         console.assert(shapeType === "circle", "Circle drag must remain in circle mode (start)");
       }
     },
-    [enableEdgeControls, isEditable, shapeType]
+    [enableEdgeControls, isEditable, shapeType, polygon.outer.length]
   );
 
   const startEdgeDrag = useCallback(
@@ -450,6 +505,52 @@ export function DeckCanvas({
       svgRef.current?.setPointerCapture?.(event.pointerId);
     },
     [enableEdgeControls, isEditable, onChangePolygon, polygon.outer, toWorldCoords]
+  );
+
+  const handleCanvasClick = useCallback(
+    (event: ReactPointerEvent<SVGSVGElement>) => {
+      // Only handle clicks in free mode
+      if (shapeType !== "free") return;
+      if (!isEditable || !onChangePolygon) return;
+
+      // Ignore if clicking on edge controls
+      const target = event.target as SVGElement | null;
+      if (target?.getAttribute?.("data-edge-hit") === "true") return;
+
+      // Ignore if panning or dragging
+      if (isPanning || dragIndex !== null || edgeDragRef.current) return;
+
+      const world = toWorldCoords(event.clientX, event.clientY);
+      if (!world) return;
+
+      // Snap to grid
+      const snappedPoint = {
+        xMm: snapToGrid(world.x, GRID_SIZE),
+        yMm: snapToGrid(world.y, GRID_SIZE),
+      };
+
+      // Check if we're closing the polygon (clicking on or near first point)
+      if (polygon.outer.length >= 3) {
+        const firstPoint = polygon.outer[0];
+        const dx = snappedPoint.xMm - firstPoint.xMm;
+        const dy = snappedPoint.yMm - firstPoint.yMm;
+        const distance = Math.sqrt(dx * dx + dy * dy);
+
+        const CLOSE_THRESHOLD = 50; // 50mm threshold for closing
+
+        // Close if clicking exactly on first point or within threshold
+        if (distance === 0 || distance <= CLOSE_THRESHOLD) {
+          // Close the polygon - don't add new point, just mark as closed
+          setIsFreePolygonClosed(true);
+          return;
+        }
+      }
+
+      // Add new vertex to polygon
+      const newOuter = [...polygon.outer, snappedPoint];
+      onChangePolygon({ ...polygon, outer: newOuter });
+    },
+    [shapeType, isEditable, onChangePolygon, isPanning, dragIndex, toWorldCoords, polygon]
   );
 
   const startPan = useCallback(
@@ -483,6 +584,18 @@ export function DeckCanvas({
     setScale((prev) => Math.min(5, Math.max(0.2, prev * factor)));
   }, []);
 
+  const handleSvgPointerDown = useCallback(
+    (event: ReactPointerEvent<SVGSVGElement>) => {
+      // In free mode with left-click, handle as canvas click
+      if (shapeType === "free" && event.button === 0) {
+        handleCanvasClick(event);
+      }
+      // Always try to start pan (will be filtered in startPan)
+      startPan(event);
+    },
+    [shapeType, handleCanvasClick, startPan]
+  );
+
   return (
     <svg
       ref={svgRef}
@@ -493,9 +606,15 @@ export function DeckCanvas({
         border: "1px solid #ddd",
         background: "#fafafa",
         display: "block",
-        cursor: isPanning || isEdgeDragging ? "grabbing" : "grab",
+        cursor:
+          isPanning || isEdgeDragging
+            ? "grabbing"
+            : shapeType === "free"
+              ? "crosshair"
+              : "grab",
+        overflow: "visible",
       }}
-      onPointerDown={startPan}
+      onPointerDown={handleSvgPointerDown}
       onPointerMove={handlePointerMove}
       onPointerUp={handlePointerUp}
       onPointerLeave={handlePointerUp}
@@ -511,7 +630,18 @@ export function DeckCanvas({
             opacity={isSubView ? 0.2 : 1}
             pointerEvents="all"
           />
+        ) : shapeType === "free" && !isFreePolygonClosed ? (
+          // Free mode: render as polyline until closed
+          <polyline
+            points={polygon.outer.map((p) => `${p.xMm},${p.yMm}`).join(" ")}
+            fill="none"
+            stroke="#5af"
+            strokeWidth={8}
+            opacity={1}
+            pointerEvents="all"
+          />
         ) : (
+          // All other shapes or closed free polygon: render as filled polygon
           <polygon
             points={polygon.outer.map((p) => `${p.xMm},${p.yMm}`).join(" ")}
             fill={isSubView ? "none" : "rgba(80,160,255,0.12)"}
@@ -565,10 +695,10 @@ export function DeckCanvas({
               key={`${point.xMm}-${point.yMm}-${idx}`}
               cx={point.xMm}
               cy={point.yMm}
-              r={24}
+              r={12}
               fill="#fff"
               stroke="#2463ff"
-              strokeWidth={4}
+              strokeWidth={2}
               style={{
                 cursor: isEditable ? "pointer" : "default",
                 pointerEvents: isEditable ? "auto" : "none",
@@ -576,6 +706,47 @@ export function DeckCanvas({
               onPointerDown={startDrag(idx)}
             />
           ))}
+
+        {/* Free mode: preview line from last point to cursor (only when not closed) */}
+        {shapeType === "free" && !isFreePolygonClosed && polygon.outer.length > 0 && cursorPosition && (
+          <>
+            <line
+              x1={polygon.outer[polygon.outer.length - 1].xMm}
+              y1={polygon.outer[polygon.outer.length - 1].yMm}
+              x2={cursorPosition.x}
+              y2={cursorPosition.y}
+              stroke="#2463ff"
+              strokeWidth={2}
+              strokeDasharray="6,4"
+              pointerEvents="none"
+              opacity={0.6}
+            />
+            {/* Show close indicator when near first point */}
+            {polygon.outer.length >= 3 && (() => {
+              const firstPoint = polygon.outer[0];
+              const dx = cursorPosition.x - firstPoint.xMm;
+              const dy = cursorPosition.y - firstPoint.yMm;
+              const distance = Math.sqrt(dx * dx + dy * dy);
+              const CLOSE_THRESHOLD = 50;
+              if (distance <= CLOSE_THRESHOLD) {
+                return (
+                  <circle
+                    cx={firstPoint.xMm}
+                    cy={firstPoint.yMm}
+                    r={CLOSE_THRESHOLD}
+                    fill="none"
+                    stroke="#2463ff"
+                    strokeWidth={2}
+                    strokeDasharray="8,4"
+                    pointerEvents="none"
+                    opacity={0.4}
+                  />
+                );
+              }
+              return null;
+            })()}
+          </>
+        )}
 
         {vertexLabels.map((vertex) => (
           <text
@@ -613,10 +784,20 @@ export function DeckCanvas({
         </text>
       )}
 
+      {shapeType === "free" && isEditable && (
+        <text x={viewBox.x + 20} y={viewBox.y + 30} fill="#2463ff" fontSize={16} pointerEvents="none">
+          {isFreePolygonClosed
+            ? `면 완성됨 | 점 개수: ${polygon.outer.length}`
+            : polygon.outer.length >= 3
+              ? `클릭하여 점 추가 | 첫 점 근처 클릭으로 면 완성 | 점 개수: ${polygon.outer.length}`
+              : `클릭하여 점 추가 | 점 개수: ${polygon.outer.length}`}
+        </text>
+      )}
+
       {summary.length > 0 && (
         <g
           pointerEvents="none"
-          transform={`translate(${viewBox.x + viewBox.w - 20} ${viewBox.y + 20})`}
+          transform={`translate(${viewBox.x + containerSize.width / scale - 20} ${viewBox.y + 20})`}
         >
           {summary.map((edge, idx) => (
             <text
@@ -635,7 +816,7 @@ export function DeckCanvas({
 
       <g
         pointerEvents="auto"
-        transform={`translate(${viewBox.x + viewBox.w / 2} ${viewBox.y + viewBox.h - 16})`}
+        transform={`translate(${viewBox.x + containerSize.width / (2 * scale)} ${viewBox.y + containerSize.height / scale - 50})`}
       >
         <g transform={`translate(-${(controls.length * 110 + (controls.length - 1) * 8) / 2} 0)`}>
           {controls.map((control, idx) => {

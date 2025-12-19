@@ -154,7 +154,17 @@ export default function App() {
 
   const applyPresetShape = useCallback((nextShape: ShapeType) => {
     setShapeType(nextShape);
-    if (nextShape === "free") return;
+    if (nextShape === "free") {
+      // Free drawing mode: start with empty canvas
+      setPlan((prev) => ({
+        ...prev,
+        polygon: {
+          ...prev.polygon,
+          outer: [],
+        },
+      }));
+      return;
+    }
     const preset = SHAPE_PRESETS[nextShape];
     const centered = fitShapeToCanvas(preset.getPoints());
     setPlan((prev) => ({
