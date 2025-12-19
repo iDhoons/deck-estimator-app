@@ -1,17 +1,183 @@
 /* 최소한의 안정적인 기본 CSS (센터링/다크모드 템플릿 제거) */
 
-html, body {
+html,
+body {
   height: 100%;
 }
 
 body {
   margin: 0;
-  background: #f5f5f5;
+  background: #e9edf3;
   color: #111;
   font-family: system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif;
+  overflow: hidden;
 }
 
 #root {
-  min-height: 100%;
+  height: 100%;
   width: 100%;
+}
+
+.app-shell {
+  min-height: 100%;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.app-header {
+  padding: 16px 24px;
+  background: #fff;
+  border-bottom: 1px solid #d8dfe8;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.app-header h1 {
+  margin: 0;
+  font-size: 24px;
+  letter-spacing: 0.4px;
+}
+
+.app-body {
+  flex: 1;
+  display: grid;
+  grid-template-columns: clamp(280px, 26vw, 360px) minmax(0, 1fr);
+  gap: 24px;
+  padding: 24px 24px 32px;
+  box-sizing: border-box;
+  overflow: hidden;
+}
+
+.controls-pane {
+  background: #fff;
+  border-radius: 16px;
+  box-shadow: 0 10px 30px rgba(15, 23, 42, 0.08);
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  height: 100%;
+  overflow: hidden;
+}
+
+.controls-pane-inner {
+  padding: 20px;
+  overflow-y: auto;
+  height: 100%;
+}
+
+.canvas-pane {
+  background: #fff;
+  border-radius: 20px;
+  box-shadow: 0 10px 35px rgba(15, 23, 42, 0.1);
+  display: flex;
+  flex-direction: column;
+  padding: 16px;
+  min-height: 0;
+  height: 100%;
+  overflow: hidden;
+}
+
+.canvas-pane header {
+  font-weight: 600;
+  margin-bottom: 12px;
+}
+
+.canvas-surface {
+  flex: 1;
+  min-height: 40vh;
+  display: flex;
+  align-items: stretch;
+  overflow: hidden;
+}
+
+.accordion-section + .accordion-section {
+  margin-top: 16px;
+}
+
+.accordion-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 0;
+  cursor: pointer;
+  border-bottom: 1px solid #e6e9ef;
+}
+
+.accordion-header h3 {
+  margin: 0;
+  font-size: 14px;
+  letter-spacing: 0.8px;
+}
+
+.accordion-content {
+  padding: 12px 0 4px;
+}
+
+.shape-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  gap: 10px;
+}
+
+.shape-button {
+  padding: 12px 10px;
+  border-radius: 12px;
+  border: 1px solid #cfd5e3;
+  background: #f6f7fb;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.shape-button.is-active {
+  border-color: #111;
+  background: #111;
+  color: #fff;
+}
+
+.dimension-list {
+  display: grid;
+  gap: 8px;
+}
+
+.dimension-item {
+  display: flex;
+  justify-content: space-between;
+  padding: 6px 10px;
+  border-radius: 8px;
+  border: 1px solid #e1e5ec;
+  background: #fdfdff;
+  font-size: 13px;
+}
+
+.rounding-controls input[type="range"] {
+  width: 100%;
+}
+
+.controls-action-button {
+  width: 100%;
+  padding: 12px;
+  border-radius: 12px;
+  border: 1px solid #111;
+  background: #fff;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+@media (max-width: 900px) {
+  .app-body {
+    grid-template-columns: 1fr;
+    grid-template-rows: minmax(0, 1fr) minmax(0, 1fr);
+  }
+
+  .canvas-pane {
+    grid-row: 1;
+  }
+
+  .controls-pane {
+    grid-row: 2;
+    max-height: 45vh;
+  }
 }
