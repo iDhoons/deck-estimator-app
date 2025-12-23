@@ -160,8 +160,73 @@ export function ResultsPanel({
                         <span>기초석/파일 (Piles)</span>
                         <b>{out.footings.qty} 개</b>
                     </div>
+                    {out.ledger && (
+                      <div style={{ display: "flex", justifyContent: "space-between", fontSize: 14 }}>
+                        <span>벽체 고정(레저) 길이</span>
+                        <b>{out.ledger.lengthM} m</b>
+                      </div>
+                    )}
+                    {out.ledger && (
+                      <div style={{ display: "flex", justifyContent: "space-between", fontSize: 14 }}>
+                        <span>레저 앙카볼트</span>
+                        <b>{out.ledger.anchorBoltsQty} 개</b>
+                      </div>
+                    )}
+                    {out.posts && (
+                      <div style={{ display: "flex", justifyContent: "space-between", fontSize: 14 }}>
+                        <span>포스트</span>
+                        <b>
+                          {out.posts.qty} 개 × {out.posts.eachLengthMm}mm
+                        </b>
+                      </div>
+                    )}
                 </div>
             </div>
+
+            {/* 계단 */}
+            {out.stairs?.enabled && out.stairs.stepCount > 0 && (
+              <div style={{ background: "#f9f9f9", padding: 12, borderRadius: 8 }}>
+                <div style={{ fontWeight: 600, marginBottom: 8, color: "#333" }}>계단</div>
+                <div style={{ display: "grid", gap: 6 }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", fontSize: 14 }}>
+                    <span>단수</span>
+                    <b>{out.stairs.stepCount} 단</b>
+                  </div>
+                  <div style={{ display: "flex", justifyContent: "space-between", fontSize: 14 }}>
+                    <span>디딤판(상판) 필요 수량</span>
+                    <b>{out.stairs.treads.pieces} 장</b>
+                  </div>
+                  <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13, color: "#666" }}>
+                    <span>디딤판 보드(단당)</span>
+                    <span>{out.stairs.treads.boardsPerStep} 줄</span>
+                  </div>
+                  <div style={{ display: "flex", justifyContent: "space-between", fontSize: 14 }}>
+                    <span>측판(스트링거)</span>
+                    <b>{out.stairs.stringers.qty} 개</b>
+                  </div>
+                  <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13, color: "#666" }}>
+                    <span>측판 길이(1개)</span>
+                    <span>{out.stairs.stringers.lengthMm} mm</span>
+                  </div>
+                  <div style={{ display: "flex", justifyContent: "space-between", fontSize: 14 }}>
+                    <span>측판 자재({out.stairs.stringers.stockLengthMm}mm) 필요 수량</span>
+                    <b>{out.stairs.stringers.pieces} 장</b>
+                  </div>
+                  {out.stairs.risers && (
+                    <div style={{ display: "flex", justifyContent: "space-between", fontSize: 14 }}>
+                      <span>챌판(막힘형) 필요 수량</span>
+                      <b>{out.stairs.risers.pieces} 장</b>
+                    </div>
+                  )}
+                  {out.stairs.landing?.type === "pad" && (
+                    <div style={{ display: "flex", justifyContent: "space-between", fontSize: 14 }}>
+                      <span>하단 패드(판석)</span>
+                      <b>{out.stairs.landing.padsQty ?? 0} 개</b>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
 
             {/* 부자재 */}
             <div style={{ background: "#f9f9f9", padding: 12, borderRadius: 8 }}>

@@ -12,7 +12,7 @@ import { t } from "./i18n";
 import { DeckCanvas, type ViewMode } from "./components/DeckCanvas";
 import { ControlsPanel } from "./components/ControlsPanel";
 import { ResultsPanel } from "./components/ResultsPanel";
-import { fitPointsToViewport } from "./geometry/polygon";
+import { fitPointsToViewport, polygonCentroid } from "./geometry/polygon";
 import { EDGE_LENGTH_STEP_MM, getEdgeList, MIN_EDGE_SPAN_MM, updateEdgeLength } from "./geometry/edges";
 
 type Mode = "consumer" | "pro";
@@ -43,6 +43,8 @@ const basePlan: Plan = {
   },
   boardWidthMm: 140,
   deckingDirectionDeg: 0,
+  attachedEdgeIndices: [],
+  substructureOverrides: {},
   stairs: {
     enabled: true,
     footprintPolygon: {
@@ -53,6 +55,11 @@ const basePlan: Plan = {
         { xMm: 0, yMm: 1300 },
       ],
     },
+    widthMm: 900,
+    totalRiseMm: 900,
+    closedRisers: false,
+    landingType: "pad",
+    stringerMaterialOverrides: {},
   },
 };
 
@@ -79,38 +86,38 @@ const SHAPE_PRESETS: Record<Exclude<ShapeType, "free">, ShapePreset> = {
     getPoints: () => [
       { xMm: 0, yMm: 0 },
       { xMm: 1000, yMm: 0 },
-      { xMm: 1000, yMm: 600 },
-      { xMm: 0, yMm: 600 },
+      { xMm: 1000, yMm: 200 },
+      { xMm: 0, yMm: 200 },
     ],
   },
   lShape: {
     label: "ㄱ자형",
     getPoints: () => [
       { xMm: 0, yMm: 0 },
-      { xMm: 1800, yMm: 0 },
-      { xMm: 1800, yMm: 500 },
-      { xMm: 700, yMm: 500 },
-      { xMm: 700, yMm: 1400 },
-      { xMm: 0, yMm: 1400 },
+      { xMm: 1000, yMm: 0 },
+      { xMm: 1000, yMm: 200 },
+      { xMm: 700, yMm: 200 },
+      { xMm: 700, yMm: 1200 },
+      { xMm: 0, yMm: 1200 },
     ],
   },
   tShape: {
     label: "T자형",
     getPoints: () => [
       { xMm: 600, yMm: 0 },
-      { xMm: 2200, yMm: 0 },
-      { xMm: 2200, yMm: 400 },
-      { xMm: 1600, yMm: 400 },
-      { xMm: 1600, yMm: 1400 },
-      { xMm: 1200, yMm: 1400 },
-      { xMm: 1200, yMm: 400 },
-      { xMm: 600, yMm: 400 },
+      { xMm: 1600, yMm: 0 },
+      { xMm: 1600, yMm: 200 },
+      { xMm: 1000, yMm: 200 },
+      { xMm: 1000, yMm: 1200 },
+      { xMm: 800, yMm: 1200 },
+      { xMm: 800, yMm: 200 },
+      { xMm: 600, yMm: 200 },
     ],
   },
   circle: {
     label: "원형",
     getPoints: () => {
-      const radius = 550;
+      const radius = 1000;
       const segments = 16;
       const pts = [];
       for (let i = 0; i < segments; i++) {
@@ -127,6 +134,26 @@ const SHAPE_PRESETS: Record<Exclude<ShapeType, "free">, ShapePreset> = {
 
 const fitShapeToCanvas = (points: { xMm: number; yMm: number }[]) =>
   fitPointsToViewport(points, VIEWBOX_SIZE, VIEWBOX_CENTER, 0.5);
+
+function circleSegmentsForSagitta(radiusMm: number, targetSagittaMm: number) {
+  const r = Math.max(radiusMm, 0);
+  const s = Math.max(0.001, targetSagittaMm);
+  if (r <= s) return 16;
+  const x = 1 - s / r;
+  const clamped = Math.min(0.999999, Math.max(-0.999999, x));
+  const n = Math.ceil(Math.PI / Math.acos(clamped));
+  return Math.min(256, Math.max(16, n));
+}
+
+function buildCirclePoints(center: { xMm: number; yMm: number }, radiusMm: number, segments: number) {
+  const pts: { xMm: number; yMm: number }[] = [];
+  const r = Math.max(radiusMm, 0);
+  for (let i = 0; i < segments; i++) {
+    const a = (i / segments) * Math.PI * 2;
+    pts.push({ xMm: center.xMm + Math.cos(a) * r, yMm: center.yMm + Math.sin(a) * r });
+  }
+  return pts;
+}
 
 const initialPlan: Plan = {
   ...basePlan,
@@ -147,7 +174,10 @@ export default function App() {
 
   // --- Handlers
   const handlePolygonChange = useCallback((updatedPolygon: Polygon) => {
-    setPlan((prev) => ({ ...prev, polygon: updatedPolygon }));
+    setPlan((prev) => {
+      const nextAttached = (prev.attachedEdgeIndices ?? []).filter((i: number) => i >= 0 && i < updatedPolygon.outer.length);
+      return { ...prev, polygon: updatedPolygon, attachedEdgeIndices: nextAttached };
+    });
     
     // polygon이 변경될 때 shapeType 자동 감지 (현재 자유형 모드가 아닐 때만)
     if (shapeType !== "free") {
@@ -181,6 +211,8 @@ export default function App() {
         setShapeType("free");
         setPlan((prev) => ({
           ...prev,
+          attachedEdgeIndices: [],
+          substructureOverrides: {},
           polygon: {
             ...prev.polygon,
             outer: [], // 빈 배열로 초기화
@@ -194,6 +226,8 @@ export default function App() {
       const centered = fitShapeToCanvas(preset.getPoints());
       setPlan((prev) => ({
         ...prev,
+        attachedEdgeIndices: [],
+        substructureOverrides: {},
         polygon: {
           ...prev.polygon,
           outer: centered,
@@ -241,8 +275,8 @@ export default function App() {
         endIndex: edge.endIndex,
       }));
 
-      // 원형은 변 길이 입력 자체를 없앰 (반지름 핸들만 사용)
-      if (shapeType === "circle" && allItems.length === 16) {
+      // 원형은 변 길이 입력 자체를 없앰 (반지름으로만 조절)
+      if (shapeType === "circle") {
         return [];
       }
       
@@ -268,6 +302,31 @@ export default function App() {
     },
     [edgeList, shapeType]
   );
+
+  const circleRadiusMm = useMemo(() => {
+    if (shapeType !== "circle") return null;
+    const pts = plan.polygon.outer;
+    if (pts.length < 3) return null;
+    const c = polygonCentroid(pts);
+    const sum = pts.reduce((acc, p) => acc + Math.hypot(p.xMm - c.xMm, p.yMm - c.yMm), 0);
+    return sum / pts.length;
+  }, [plan.polygon.outer, shapeType]);
+
+  const handleCircleRadiusChange = useCallback((nextRadiusMm: number) => {
+    const target = Math.round(nextRadiusMm / EDGE_LENGTH_STEP_MM) * EDGE_LENGTH_STEP_MM;
+    let didUpdate = false;
+    setPlan((prev) => {
+      const pts = prev.polygon.outer;
+      if (pts.length < 3) return prev;
+      const c = polygonCentroid(pts);
+      const radius = Math.max(MIN_EDGE_SPAN_MM, target);
+      const seg = circleSegmentsForSagitta(radius, 10);
+      const newOuter = buildCirclePoints(c, radius, seg);
+      didUpdate = true;
+      return { ...prev, polygon: { ...prev.polygon, outer: newOuter } };
+    });
+    return didUpdate;
+  }, []);
 
   const handleEdgeLengthChange = useCallback((startIndex: number, nextLengthMm: number) => {
     const targetLength = Math.round(nextLengthMm / EDGE_LENGTH_STEP_MM) * EDGE_LENGTH_STEP_MM;
@@ -409,10 +468,23 @@ export default function App() {
           if (!target) return false;
           return handleEdgeLengthChange(target.startIndex, lengthMm);
         }}
+        circleRadiusMm={circleRadiusMm ?? undefined}
+        onChangeCircleRadiusMm={(next) => handleCircleRadiusChange(next)}
         onToggleResults={() => setShowResults((v) => !v)}
           showResults={showResults}
-          viewMode={viewMode}
-          onChangeViewMode={setViewMode}
+          substructureAuto={{
+            primaryLenM: out.substructure.primaryLenM,
+            secondaryLenM: out.substructure.secondaryLenM,
+          }}
+          substructureOverridesMm={{
+            primaryLenMm: plan.substructureOverrides?.primaryLenMm,
+            secondaryLenMm: plan.substructureOverrides?.secondaryLenMm,
+          }}
+          onChangeSubstructureOverridesMm={(next) =>
+            setPlan((prev) => ({ ...prev, substructureOverrides: next }))
+          }
+          stairs={plan.stairs}
+          onChangeStairs={(next) => setPlan((prev) => ({ ...prev, stairs: next }))}
         />
 
         <section className="canvas-pane">
@@ -426,6 +498,13 @@ export default function App() {
                 onSelectShape={(shapeId) => applyPresetShape(shapeId as ShapeType)}
                 structureLayout={out.structureLayout}
                 shapeType={shapeType}
+                attachedEdgeIndices={plan.attachedEdgeIndices ?? []}
+                onChangeAttachedEdgeIndices={(next) =>
+                  setPlan((prev) => ({ ...prev, attachedEdgeIndices: next }))
+                }
+                onToggleViewMode={() =>
+                  setViewMode((prev) => (prev === "deck" ? "substructure" : "deck"))
+                }
               />
             </div>
           </div>

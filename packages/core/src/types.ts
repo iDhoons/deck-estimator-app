@@ -23,7 +23,18 @@ export type Plan = {
   /** 데크 상단 마감 높이(지면 기준). 기둥(Post) 길이 산출에 사용 */
   deckHeightMm?: number;
 
-  /** 벽체 고정(ledger) 여부. MVP: true면 최상단(최소 y) 변을 벽체로 가정 */
+  /** 벽체(ledger)로 선택된 외곽 변의 startIndex 목록 (복수 선택 가능) */
+  attachedEdgeIndices?: number[];
+
+  /** 하부구조 길이 수동 오버라이드 (기본값=자동 계산) */
+  substructureOverrides?: {
+    /** 멍에(Bearer) 총 길이 */
+    primaryLenMm?: number;
+    /** 장선(Joist) 총 길이 */
+    secondaryLenMm?: number;
+  };
+
+  /** (legacy) 벽체 고정 여부. true면 기본 벽 변을 추정해서 처리(이후 제거 예정) */
   attachedToWall?: boolean;
 
   stairs?: {
@@ -40,6 +51,13 @@ export type Plan = {
 
     /** 계단 최하단 랜딩 */
     landingType?: "pad" | "post";
+
+    /** 측판(스트링거) 자재 오버라이드: 미기재 시 메인데크 제품과 동일한 값 사용 */
+    stringerMaterialOverrides?: {
+      thicknessMm?: number;
+      widthMm?: number;
+      stockLengthMm?: number;
+    };
 
     /** (legacy) */
     sideCladding?: boolean;
