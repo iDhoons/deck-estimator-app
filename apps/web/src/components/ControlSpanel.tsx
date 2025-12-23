@@ -20,10 +20,6 @@ export function ControlsPanel({
   onSelectShape,
   dimensions,
   onChangeDimensionLength,
-  isRoundedEnabled,
-  cornerRadiusMm,
-  onRadiusChange,
-  onToggleRounding,
   onToggleResults,
   showResults,
 }: {
@@ -32,10 +28,6 @@ export function ControlsPanel({
   onSelectShape: (id: string) => void;
   dimensions: DimensionItem[];
   onChangeDimensionLength: (edgeId: string, nextLengthMm: number) => boolean;
-  isRoundedEnabled: boolean;
-  cornerRadiusMm: number;
-  onRadiusChange: (value: number) => void;
-  onToggleRounding: () => void;
   onToggleResults: () => void;
   showResults: boolean;
 }) {
@@ -143,30 +135,6 @@ export function ControlsPanel({
     </>
   );
 
-  const roundingContent = (
-    <div className="rounding-controls">
-      <div style={{ fontSize: 13, marginBottom: 12 }}>모서리를 둥글게 만들어 데크 윤곽을 부드럽게 합니다.</div>
-      <input
-        type="range"
-        min={0}
-        max={120}
-        value={cornerRadiusMm}
-        onChange={(e) => onRadiusChange(Number(e.target.value))}
-      />
-      <div style={{ fontSize: 13, margin: "8px 0 12px" }}>
-        반경: <strong>{cornerRadiusMm}mm</strong>
-      </div>
-      <button
-        className="controls-action-button"
-        type="button"
-        onClick={onToggleRounding}
-        style={{ background: isRoundedEnabled ? "#111" : "#fff", color: isRoundedEnabled ? "#fff" : "#111" }}
-      >
-        {isRoundedEnabled ? "둥글림 해제" : "둥글림 적용"}
-      </button>
-    </div>
-  );
-
   const quickSummary = (text: string) => (
     <p style={{ fontSize: 13, color: "#555", margin: 0 }}>{text}</p>
   );
@@ -174,7 +142,7 @@ export function ControlsPanel({
   const sections = useMemo(
     () => [
       { id: "floor", title: "평면도", content: floorPlanContent },
-      { id: "steps", title: "계단 및 측면", content: roundingContent },
+      { id: "steps", title: "계단 및 측면", content: quickSummary("계단 및 측면 옵션을 설정하세요.") },
       {
         id: "decking",
         title: "데크재",
@@ -203,7 +171,7 @@ export function ControlsPanel({
         content: quickSummary("장선 간격, 기초 배치, 하드웨어를 설정하세요."),
       },
     ],
-    [floorPlanContent, roundingContent, onToggleResults, showResults]
+    [floorPlanContent, onToggleResults, showResults]
   );
 
   return (

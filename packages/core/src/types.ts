@@ -8,6 +8,8 @@ export type Polygon = {
   holes?: Point[][];
 };
 
+export type LineSegment = { x1: number; y1: number; x2: number; y2: number };
+
 export type Plan = {
   unit: "mm";
   polygon: Polygon;
@@ -18,6 +20,12 @@ export type Plan = {
   /** ✅ 사용자가 선택한 시공 방향(0=가로, 90=세로 같은 UX 가능) */
   deckingDirectionDeg: number;
 
+  /** 데크 상단 마감 높이(지면 기준). 기둥(Post) 길이 산출에 사용 */
+  deckHeightMm?: number;
+
+  /** 벽체 고정(ledger) 여부. MVP: true면 최상단(최소 y) 변을 벽체로 가정 */
+  attachedToWall?: boolean;
+
   stairs?: {
     enabled: boolean;
 
@@ -27,6 +35,13 @@ export type Plan = {
     /** 옵션 표기용 */
     widthMm?: number;
     totalRiseMm?: number;
+    /** 옆면/챌판 마감(막힘형). false면 오픈형으로 간주 */
+    closedRisers?: boolean;
+
+    /** 계단 최하단 랜딩 */
+    landingType?: "pad" | "post";
+
+    /** (legacy) */
     sideCladding?: boolean;
   };
 };
@@ -62,6 +77,12 @@ export type Ruleset = {
   enableCutPlan: boolean;
 };
 
+export type StructureLayout = {
+  piles: Point[];
+  bearers: LineSegment[];
+  joists: LineSegment[];
+};
+
 export type Quantities = {
   area: { totalM2: number; deckM2: number; stairsM2: number };
 
@@ -81,6 +102,63 @@ export type Quantities = {
   footings: { qty: number };
 
   fasteners: { mode: FasteningMode; clips?: number; screws?: number };
+
+  /** 벽체 고정(ledger) 산출 */
+  ledger?: {
+    lengthM: number;
+    anchorBoltsQty: number;
+  };
+
+  /** 기둥(Post) 산출 */
+  posts?: {
+    qty: number;
+    eachLengthMm: number;
+    totalLengthM: number;
+  };
+
+  /** 구조 철물(추정치) */
+  hardware?: {
+    joistHangersQty?: number;
+    stringerHangersQty?: number;
+    postAnchorsQty?: number;
+  };
+
+  /** 계단 자재 내역(하부구조 포함) */
+  stairs?: {
+    enabled: boolean;
+    stepCount: number;
+    unitRiseMm: number;
+    unitRunMm: number;
+    widthMm: number;
+    stringers: {
+      qty: number;
+      lengthMm: number;
+      stockLengthMm: number;
+      pieces: number;
+    };
+    treads: {
+      boardsPerStep: number;
+      usedLengthMm: number;
+      pieces: number;
+    };
+    risers?: {
+      boardsPerStep: number;
+      usedLengthMm: number;
+      pieces: number;
+    };
+    landing?: {
+      type: "pad" | "post";
+      padsQty?: number;
+      pilesQty?: number;
+    };
+    fasteners?: {
+      mode: FasteningMode;
+      screws?: number;
+      clips?: number;
+    };
+  };
+
+  structureLayout?: StructureLayout;
 };
 
 export type CutPiece = {

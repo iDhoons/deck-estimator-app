@@ -1,11 +1,13 @@
-import type { Plan, Product, Ruleset, Quantities, FasteningMode, Polygon } from "./types";
+import type { Plan, Product, Ruleset, Quantities, FasteningMode, Polygon, Point } from "./types";
 import {
   degToRad,
   rotatePolygon,
   polygonAreaMm2,
   bbox,
   polygonSpanAtY,
-  polygonSpanAtX
+  getClippedGridLines,
+  isPointInPolygon,
+  rotatePoint
 } from "./geometry";
 
 function consumerLossRate(plan: Plan, rules: Ruleset): number {
@@ -44,48 +46,6 @@ function totalDeckBoardUsedLengthMm(rot: Polygon, pitchMm: number): { usedLength
   return { usedLengthMm: used, boardLines: lines };
 }
 
-function totalLineLengthAlongX(rot: Polygon, spacingMm: number): { lenMm: number; lines: number } {
-  const bb = bbox(rot.outer);
-  const minX = bb.minX;
-  const maxX = bb.maxX;
-  const eps = 0.5;
-
-  let x = minX + eps;
-  let len = 0;
-  let lines = 0;
-
-  while (x <= maxX - eps) {
-    const span = polygonSpanAtX(rot, x);
-    if (span > 0) {
-      len += span;
-      lines += 1;
-    }
-    x += spacingMm;
-  }
-  return { lenMm: len, lines };
-}
-
-function totalLineLengthAlongY(rot: Polygon, spacingMm: number): { lenMm: number; lines: number } {
-  const bb = bbox(rot.outer);
-  const minY = bb.minY;
-  const maxY = bb.maxY;
-  const eps = 0.5;
-
-  let y = minY + eps;
-  let len = 0;
-  let lines = 0;
-
-  while (y <= maxY - eps) {
-    const span = polygonSpanAtY(rot, y);
-    if (span > 0) {
-      len += span;
-      lines += 1;
-    }
-    y += spacingMm;
-  }
-  return { lenMm: len, lines };
-}
-
 export function calculateQuantities(
   plan: Plan,
   product: Product,
@@ -111,22 +71,92 @@ export function calculateQuantities(
   const lossRate = rules.mode === "consumer" ? consumerLossRate(plan, rules) : 0;
   const pieces = Math.ceil((usedLengthMm / product.stockLengthMm) * (1 + lossRate));
 
-  // 4) 하부 길이 (단순 v1)
-  // - 2차(장선): 보드에 수직 => X축 방향에 spacing으로 라인 생성(= x=const 라인 길이 합)
-  const secondary = totalLineLengthAlongX(rotDeck, rules.secondarySpacingMm);
+  // 4) 하부 구조물 (정밀 계산 & 레이아웃)
+  // 내부 장선 & 멍에
+  const innerJoists = getClippedGridLines(rotDeck, rules.secondarySpacingMm, "x");
+  const bearers = getClippedGridLines(rotDeck, rules.primarySpacingMm, "y");
 
-  // - 1차(멍에): 2차에 수직 => y=const 라인 길이 합
-  const primary = totalLineLengthAlongY(rotDeck, rules.primarySpacingMm);
+  // 외곽 장선 (Rim Joist) 생성
+  const rimJoists: { x1: number; y1: number; x2: number; y2: number }[] = [];
+  const outer = rotDeck.outer;
+  for (let i = 0; i < outer.length; i++) {
+    const p1 = outer[i];
+    const p2 = outer[(i + 1) % outer.length];
+    rimJoists.push({ x1: p1.xMm, y1: p1.yMm, x2: p2.xMm, y2: p2.yMm });
+  }
 
-  // 5) 패스너(단순 v1)
-  const intersections = boardLines * secondary.lines;
+  // 모든 장선 합치기 (내부 + 외곽)
+  const allJoists = [...innerJoists, ...rimJoists];
+
+  // 길이 합산
+  const secondaryLenMm = allJoists.reduce((acc, j) => acc + Math.hypot(j.x2 - j.x1, j.y2 - j.y1), 0);
+  const primaryLenMm = bearers.reduce((acc, b) => acc + Math.hypot(b.x2 - b.x1, b.y2 - b.y1), 0);
+
+  // 5) 기초(Pile) 위치 계산 (장선-멍에 교차점 중 다각형 내부)
+  const piles: Point[] = [];
+  
+  for (const j of allJoists) {
+    // 수평선(Bearer)과 임의의 선분(Joist)의 교차점 구하기
+    // Bearer: y = b.y1 (b.y1 == b.y2), x in [min(bx), max(bx)]
+    // Joist: (x1, y1) to (x2, y2)
+
+    const jyMin = Math.min(j.y1, j.y2);
+    const jyMax = Math.max(j.y1, j.y2);
+
+    for (const b of bearers) { 
+       const by = b.y1;
+       const bxMin = Math.min(b.x1, b.x2);
+       const bxMax = Math.max(b.x1, b.x2);
+
+       // Y 범위 체크 (교차 가능성)
+       // 오차 허용 (eps)
+       if (by < jyMin - 0.1 || by > jyMax + 0.1) continue;
+
+       let intersectX: number;
+        
+       if (Math.abs(j.y2 - j.y1) < 1e-9) {
+           // Joist가 수평선인 경우 (Bearer와 평행) -> 교차점 없음 (혹은 무수히 많음)
+           continue; 
+       } else {
+           const t = (by - j.y1) / (j.y2 - j.y1);
+           intersectX = j.x1 + t * (j.x2 - j.x1);
+       }
+
+       // Bearer 구간 체크
+       if (intersectX >= bxMin - 0.1 && intersectX <= bxMax + 0.1) {
+          const p = { xMm: intersectX, yMm: by };
+          // 이미 클리핑된 선분들의 교차점이므로 대부분 내부이나, 구멍 등으로 인해 한번 더 체크
+          if (isPointInPolygon(p, rotDeck)) {
+             piles.push(p);
+          }
+       }
+    }
+  }
+
+  const footingQty = piles.length;
+  const anchorQty = footingQty;
+
+  // 6) 패스너
+  // 내부 장선 라인 수만 고려 (단순화)
+  const uniqueJoistXs = new Set(innerJoists.map(j => Math.round(j.x1 * 10) / 10)).size;
+  const intersections = boardLines * uniqueJoistXs;
   const screws = fasteningMode === "screw" ? intersections * rules.screwPerIntersection : undefined;
   const clips = fasteningMode === "clip" ? intersections : undefined;
 
-  // 6) 동바리/앙카(단순 v1)
-  // 💭 멍에×장선 교차점 개수로 추정 (나중에 현장 규칙 반영 가능)
-  const footingQty = primary.lines * secondary.lines;
-  const anchorQty = footingQty;
+  // 7) 레이아웃 좌표 복원 (원래 각도로 회전)
+  const invRad = degToRad(plan.deckingDirectionDeg);
+  
+  const finalPiles = piles.map(p => rotatePoint(p, invRad));
+  const finalJoists = allJoists.map(j => {
+     const p1 = rotatePoint({ xMm: j.x1, yMm: j.y1 }, invRad);
+     const p2 = rotatePoint({ xMm: j.x2, yMm: j.y2 }, invRad);
+     return { x1: p1.xMm, y1: p1.yMm, x2: p2.xMm, y2: p2.yMm };
+  });
+  const finalBearers = bearers.map(b => {
+     const p1 = rotatePoint({ xMm: b.x1, yMm: b.y1 }, invRad);
+     const p2 = rotatePoint({ xMm: b.x2, yMm: b.y2 }, invRad);
+     return { x1: p1.xMm, y1: p1.yMm, x2: p2.xMm, y2: p2.yMm };
+  });
 
   return {
     area: {
@@ -141,11 +171,16 @@ export function calculateQuantities(
       lossRateApplied: lossRate
     },
     substructure: {
-      primaryLenM: Math.round((primary.lenMm / 1000) * 1000) / 1000,
-      secondaryLenM: Math.round((secondary.lenMm / 1000) * 1000) / 1000
+      primaryLenM: Math.round((primaryLenMm / 1000) * 1000) / 1000,
+      secondaryLenM: Math.round((secondaryLenMm / 1000) * 1000) / 1000
     },
     anchors: { qty: anchorQty },
     footings: { qty: footingQty },
-    fasteners: { mode: fasteningMode, screws, clips }
+    fasteners: { mode: fasteningMode, screws, clips },
+    structureLayout: {
+       piles: finalPiles,
+       bearers: finalBearers,
+       joists: finalJoists
+    }
   };
 }

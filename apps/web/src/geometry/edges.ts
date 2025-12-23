@@ -33,7 +33,9 @@ export function collectEdgeHandles(points: PlanPoint[]) {
     const end = points[nextIndex];
     const dx = end.xMm - start.xMm;
     const dy = end.yMm - start.yMm;
+    
     if (Math.abs(dx) < EPS && Math.abs(dy) >= EPS) {
+      // 수직 변
       const minY = Math.min(start.yMm, end.yMm) - EPS;
       const maxY = Math.max(start.yMm, end.yMm) + EPS;
       const vertexIndices: number[] = [];
@@ -53,6 +55,7 @@ export function collectEdgeHandles(points: PlanPoint[]) {
         vertexIndices,
       });
     } else if (Math.abs(dy) < EPS && Math.abs(dx) >= EPS) {
+      // 수평 변
       const minX = Math.min(start.xMm, end.xMm) - EPS;
       const maxX = Math.max(start.xMm, end.xMm) + EPS;
       const vertexIndices: number[] = [];
@@ -70,6 +73,21 @@ export function collectEdgeHandles(points: PlanPoint[]) {
         start: { x: start.xMm, y: start.yMm },
         end: { x: end.xMm, y: end.yMm },
         vertexIndices,
+      });
+    } else {
+      // 대각선 변 (수직/수평이 아닌 변) - 이제 핸들 생성
+      const length = Math.hypot(dx, dy);
+      if (length < EPS) continue;
+      
+      // 대각선 변의 경우 startIndex와 endIndex만 포함
+      handles.push({
+        id: `edge-${i}`,
+        orientation: "horizontal", // 기존 타입 유지 (드래그 로직 호환)
+        startIndex: i,
+        endIndex: nextIndex,
+        start: { x: start.xMm, y: start.yMm },
+        end: { x: end.xMm, y: end.yMm },
+        vertexIndices: [i, nextIndex], // 대각선 변은 두 꼭짓점만
       });
     }
   }
@@ -158,25 +176,25 @@ export function updateEdgeLength(
   if (currentLength < EPS) return null;
 
   const direction = { x: vec.x / currentLength, y: vec.y / currentLength };
-  const nextVec = { x: direction.x * targetLengthMm, y: direction.y * targetLengthMm };
-  const delta = { x: nextVec.x - vec.x, y: nextVec.y - vec.y };
-  if (Math.hypot(delta.x, delta.y) < EPS) return points;
-
-  const forwardIndices: number[] = [];
-  for (let idx = endIndex; idx !== startIndex; idx = (idx + 1) % n) {
-    forwardIndices.push(idx);
-  }
-
-  const backwardIndices: number[] = [];
-  for (let idx = startIndex; idx !== endIndex; idx = (idx + 1) % n) {
-    backwardIndices.push(idx);
-  }
-
-  const candidates = [
-    { indices: forwardIndices, delta },
-    { indices: backwardIndices, delta: { x: -delta.x, y: -delta.y } },
-  ].sort((a, b) => a.indices.length - b.indices.length);
-
+  
+  // 변의 중점을 기준으로 양쪽으로 확장/축소
+  // 목표 길이의 절반만큼 양쪽으로 이동
+  const halfDelta = {
+    x: direction.x * (targetLengthMm - currentLength) / 2,
+    y: direction.y * (targetLengthMm - currentLength) / 2,
+  };
+  
+  // 시작점과 끝점만 이동 (중점 기준으로 양쪽으로 확장)
+  const updated = points.map((pt, idx) => {
+    if (idx === startIndex) {
+      return { xMm: pt.xMm - halfDelta.x, yMm: pt.yMm - halfDelta.y };
+    } else if (idx === endIndex) {
+      return { xMm: pt.xMm + halfDelta.x, yMm: pt.yMm + halfDelta.y };
+    }
+    return pt;
+  });
+  
+  // 유효성 검사
   const isValid = (pts: PlanPoint[]) => {
     for (let i = 0; i < pts.length; i++) {
       const next = (i + 1) % pts.length;
@@ -186,15 +204,8 @@ export function updateEdgeLength(
     }
     return true;
   };
-
-  for (const candidate of candidates) {
-    const set = new Set(candidate.indices);
-    const updated = points.map((pt, idx) =>
-      set.has(idx) ? { xMm: pt.xMm + candidate.delta.x, yMm: pt.yMm + candidate.delta.y } : pt
-    );
-    if (isValid(updated)) return updated;
-  }
-
+  
+  if (isValid(updated)) return updated;
   return null;
 }
 

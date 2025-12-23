@@ -1,118 +1,123 @@
-import type { Plan, Product, Ruleset, CutPlan, CutRow, CutPiece, Polygon, Point } from "./types";
+import type { Plan, Product, Ruleset, CutPlan, CutRow, CutPiece } from "./types";
+import { degToRad, rotatePolygon, bbox, polygonSpanAtY } from "./geometry";
 
-// --- tiny local geometry helpers (MVP) ---
-function toRad(deg: number) {
-  return (deg * Math.PI) / 180;
-}
-
-function rotatePoint(p: Point, rad: number): Point {
-  const c = Math.cos(rad);
-  const s = Math.sin(rad);
-  return { xMm: p.xMm * c - p.yMm * s, yMm: p.xMm * s + p.yMm * c };
-}
-
-function rotatePolygon(poly: Polygon, deg: number): Polygon {
-  const rad = toRad(deg);
-  return {
-    outer: poly.outer.map((p) => rotatePoint(p, rad)),
-    holes: poly.holes ? poly.holes.map((h) => h.map((p) => rotatePoint(p, rad))) : undefined
-  };
-}
-
-function spanLengthMm(poly: Polygon, axis: "x" | "y"): number {
-  const pts: Point[] = [...poly.outer, ...(poly.holes ? poly.holes.flat() : [])];
-  if (pts.length === 0) return 0;
-  const vals = pts.map((p) => (axis === "x" ? p.xMm : p.yMm));
-  const min = Math.min(...vals);
-  const max = Math.max(...vals);
-  return max - min;
-}
-
-/**
- * Pro-mode MVP cut plan:
- * - row count: based on (boardWidth + gap) pitch across Y-span
- * - required length per row: uses X-span (rough, but stable)
- * - offcut reuse: greedy (use largest offcut that fits)
- * - returns colorGroup for future canvas coloring
- */
 export function buildCutPlan(plan: Plan, product: Product, rules: Ruleset): CutPlan | null {
   if (rules.mode !== "pro") return null;
 
-  // rotate polygon so board direction ~ X axis (MVP)
-  const poly = rotatePolygon(plan.polygon, -plan.deckingDirectionDeg);
+  // 1. 회전 및 기본 설정
+  // 보드 방향을 X축으로 맞추기 위해 -deg 회전
+  const rad = degToRad(-plan.deckingDirectionDeg);
+  const poly = rotatePolygon(plan.polygon, rad);
 
   const boardWidth = plan.boardWidthMm ?? product.widthOptionsMm?.[0] ?? 140;
   const gap = rules.gapMm ?? product.gapMm ?? 5;
   const pitchMm = boardWidth + gap;
-
-  const ySpan = spanLengthMm(poly, "y");
-  const rows = Math.max(1, Math.ceil(ySpan / pitchMm));
-
-  const xSpan = spanLengthMm(poly, "x");
-  const requiredLenMm = Math.max(0, Math.round(xSpan));
-
   const stockLen = product.stockLengthMm;
-  const offcuts: number[] = [];
-  const cutRows: CutRow[] = [];
+  const kerf = rules.kerfMm ?? 0;
 
+  // 2. Y축 스캔 범위
+  const bb = bbox(poly.outer);
+  const minY = bb.minY;
+  const maxY = bb.maxY;
+  
+  const cutRows: CutRow[] = [];
+  const offcuts: number[] = []; // 가용 오프컷 풀 (mm)
+  
   let groupSeq = 1;
   const newGroup = () => `G${groupSeq++}`;
 
-  for (let r = 0; r < rows; r++) {
-    let remaining = requiredLenMm;
-    const pieces: CutPiece[] = [];
+  // 안전하게 0.5mm 정도 안쪽에서 시작
+  const eps = 0.5;
+  let y = minY + eps;
+  let rowIndex = 0;
 
-    // 큰 오프컷부터 쓰기
-    offcuts.sort((a, b) => b - a);
-
-    for (let i = 0; i < offcuts.length && remaining > 0; ) {
-      const oc = offcuts[i];
-      if (oc <= 0) { offcuts.splice(i, 1); continue; }
-
-      if (oc <= remaining) {
-        pieces.push({
-          id: `R${r}-O${i}`,
-          source: "offcut",
-          colorGroup: "OFFCUT",
-          lengthMm: oc
+  while (y <= maxY - eps) {
+    // 3. 현재 줄의 필요 길이 계산
+    const requiredLenMm = polygonSpanAtY(poly, y);
+    
+    if (requiredLenMm > 0) {
+        let remaining = requiredLenMm;
+        const pieces: CutPiece[] = [];
+        let rowOffcut = 0; // 이 줄에서 발생한 자투리 (시각화용)
+        
+        // 4. 자재 할당 (Bin Packing - Best Fit Strategy)
+        while (remaining > 0) {
+            // 한 번에 사용할 최대 길이는 원장 길이
+            let chunk = remaining;
+            if (chunk > stockLen) {
+                chunk = stockLen;
+            }
+            
+            // Best Fit: chunk 이상인 오프컷 중 가장 작은 것 찾기
+            offcuts.sort((a, b) => a - b);
+            let bestOffcutIdx = -1;
+            
+            for (let i = 0; i < offcuts.length; i++) {
+                if (offcuts[i] >= chunk) {
+                    bestOffcutIdx = i;
+                    break; // 오름차순이므로 찾자마자 Best Fit
+                }
+            }
+            
+            if (bestOffcutIdx !== -1) {
+                // 오프컷 재사용
+                const sourceLen = offcuts[bestOffcutIdx];
+                const usedLen = chunk;
+                offcuts.splice(bestOffcutIdx, 1);
+                
+                pieces.push({
+                    id: `R${rowIndex}-P${pieces.length}-OFF`,
+                    source: "offcut",
+                    colorGroup: "OFFCUT",
+                    lengthMm: usedLen
+                });
+                
+                remaining -= usedLen;
+                
+                // 남은 자투리 반환
+                const leftOver = sourceLen - usedLen - kerf;
+                if (leftOver > 50) { // 50mm 미만은 폐기
+                    offcuts.push(leftOver);
+                    // 마지막 조각이었다면 이 줄의 offcut으로 기록 (선택적)
+                    if (remaining <= 0) rowOffcut = leftOver;
+                }
+            } else {
+                // 새 보드 사용
+                const group = newGroup();
+                const usedLen = chunk;
+                
+                pieces.push({
+                    id: `R${rowIndex}-P${pieces.length}-NEW`,
+                    source: "stock",
+                    colorGroup: group,
+                    lengthMm: usedLen
+                });
+                
+                remaining -= usedLen;
+                
+                const leftOver = stockLen - usedLen - kerf;
+                if (leftOver > 50) {
+                    offcuts.push(leftOver);
+                    if (remaining <= 0) rowOffcut = leftOver;
+                }
+            }
+        }
+        
+        cutRows.push({
+            rowIndex,
+            requiredLenMm,
+            pieces,
+            offcutMm: rowOffcut
         });
-        remaining -= oc;
-        offcuts.splice(i, 1);
-      } else {
-        i++;
-      }
     }
-
-    // 새 보드로 채우기
-    while (remaining > 0) {
-      const group = newGroup();
-      const take = Math.min(stockLen, remaining);
-      pieces.push({
-        id: `R${r}-S${pieces.length}`,
-        source: "stock",
-        colorGroup: group,
-        lengthMm: take
-      });
-      remaining -= take;
-
-      const off = stockLen - take;
-      if (off > 0) offcuts.push(off);
-    }
-
-    const last = pieces[pieces.length - 1];
-    const offcutMm = last?.source === "stock" ? Math.max(0, stockLen - last.lengthMm) : 0;
-
-    cutRows.push({
-      rowIndex: r,
-      requiredLenMm,
-      pieces,
-      offcutMm
-    });
+    
+    y += pitchMm;
+    rowIndex++;
   }
 
   return {
     stockLengthMm: stockLen,
-    totalRows: rows,
+    totalRows: rowIndex,
     rows: cutRows,
     offcutsPoolMm: offcuts
   };

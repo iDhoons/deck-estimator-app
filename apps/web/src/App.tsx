@@ -16,7 +16,7 @@ import { fitPointsToViewport } from "./geometry/polygon";
 import { EDGE_LENGTH_STEP_MM, getEdgeList, MIN_EDGE_SPAN_MM, updateEdgeLength } from "./geometry/edges";
 
 type Mode = "consumer" | "pro";
-type ShapeType = "rectangle" | "lShape" | "tShape" | "circle" | "free";
+export type ShapeType = "rectangle" | "lShape" | "tShape" | "circle" | "free";
 
 const VIEWBOX_SIZE = { width: 2000, height: 1200 };
 const VIEWBOX_CENTER = { x: VIEWBOX_SIZE.width / 2, y: VIEWBOX_SIZE.height / 2 };
@@ -132,7 +132,7 @@ const initialPlan: Plan = {
   ...basePlan,
   polygon: {
     ...basePlan.polygon,
-    outer: fitShapeToCanvas(basePlan.polygon.outer),
+    outer: fitShapeToCanvas(SHAPE_PRESETS.rectangle.getPoints()),
   },
 };
 
@@ -141,33 +141,55 @@ export default function App() {
   const [plan, setPlan] = useState<Plan>(initialPlan);
   const [mode, setMode] = useState<Mode | null>(null);
   const fastening: FasteningMode = "clip";
-  const [viewMode] = useState<ViewMode>("deck");
+  const [viewMode, setViewMode] = useState<ViewMode>("deck");
   const [showResults, setShowResults] = useState(false);
   const [shapeType, setShapeType] = useState<ShapeType>("rectangle");
-  const [isRoundedEnabled, setIsRoundedEnabled] = useState(false);
-  const [cornerRadiusMm, setCornerRadiusMm] = useState(40);
 
   // --- Handlers
   const handlePolygonChange = useCallback((updatedPolygon: Polygon) => {
     setPlan((prev) => ({ ...prev, polygon: updatedPolygon }));
-  }, []);
+    
+    // polygon이 변경될 때 shapeType 자동 감지 (현재 자유형 모드가 아닐 때만)
+    if (shapeType !== "free") {
+      const pointCount = updatedPolygon.outer.length;
+      let detectedShape: ShapeType = "free";
+      
+      if (pointCount === 0) {
+        detectedShape = "free";
+      } else if (pointCount === 4) {
+        detectedShape = "rectangle";
+      } else if (pointCount === 6) {
+        detectedShape = "lShape";
+      } else if (pointCount === 8) {
+        detectedShape = "tShape";
+      } else if (pointCount === 16) {
+        detectedShape = "circle";
+      } else {
+        detectedShape = "free";
+      }
+      
+      if (detectedShape !== "free") {
+        setShapeType(detectedShape);
+      }
+    }
+  }, [shapeType]);
 
   const applyPresetShape = useCallback(
     (nextShape: ShapeType) => {
-      if (nextShape === shapeType) return;
-
-      setShapeType(nextShape);
+      // Free drawing mode: 캔버스 초기화하여 새로 그리기 시작
       if (nextShape === "free") {
-        // Free drawing mode: start with empty canvas
+        setShapeType("free");
         setPlan((prev) => ({
           ...prev,
           polygon: {
             ...prev.polygon,
-            outer: [],
+            outer: [], // 빈 배열로 초기화
           },
         }));
         return;
       }
+
+      setShapeType(nextShape);
       const preset = SHAPE_PRESETS[nextShape];
       const centered = fitShapeToCanvas(preset.getPoints());
       setPlan((prev) => ({
@@ -178,7 +200,7 @@ export default function App() {
         },
       }));
     },
-    [shapeType]
+    []
   );
 
   // --- Derived
@@ -210,22 +232,93 @@ export default function App() {
     []
   );
   const dimensionItems = useMemo(
-    () =>
-      edgeList.map((edge) => ({
+    () => {
+      const allItems = edgeList.map((edge) => ({
         id: edge.id,
         label: `${edge.fromLabel}–${edge.toLabel}`,
         lengthMm: edge.lengthMm,
         startIndex: edge.startIndex,
         endIndex: edge.endIndex,
-      })),
-    [edgeList]
+      }));
+
+      // 원형은 변 길이 입력 자체를 없앰 (반지름 핸들만 사용)
+      if (shapeType === "circle" && allItems.length === 16) {
+        return [];
+      }
+      
+      // 직사각형인 경우 처음 2개의 변만 표시 (A-B, B-C)
+      // C-D, D-A는 A-B, B-C와 동일하므로 제거
+      if (shapeType === "rectangle" && allItems.length === 4) {
+        return allItems.slice(0, 2);
+      }
+      
+      // ㄱ자형인 경우 A-B(인덱스 0)와 F-A(인덱스 5) 제외
+      // A-B, F-A는 다른 변들의 조합으로 자동 계산됨
+      if (shapeType === "lShape" && allItems.length === 6) {
+        return allItems.filter((_, idx) => idx !== 0 && idx !== 5);
+      }
+      
+      // T자형인 경우 A-B(인덱스 0)와 H-A(인덱스 7) 제외
+      // A-B는 전체 상단 가로 (자동 계산), H-A는 B-C와 대칭
+      if (shapeType === "tShape" && allItems.length === 8) {
+        return allItems.filter((_, idx) => idx !== 0 && idx !== 7);
+      }
+      
+      return allItems;
+    },
+    [edgeList, shapeType]
   );
 
   const handleEdgeLengthChange = useCallback((startIndex: number, nextLengthMm: number) => {
     const targetLength = Math.round(nextLengthMm / EDGE_LENGTH_STEP_MM) * EDGE_LENGTH_STEP_MM;
     let didUpdate = false;
     setPlan((prev) => {
-      const updatedOuter = updateEdgeLength(prev.polygon.outer, startIndex, targetLength, {
+      const points = prev.polygon.outer;
+      const isRectangle = shapeType === "rectangle" && points.length === 4;
+      
+      if (isRectangle) {
+        // 직사각형 전용 로직: 평행한 변이 함께 움직여 직사각형 형태 유지
+        const [A, B, C, D] = points;
+        let newPoints: typeof points;
+        
+        if (startIndex === 0) {
+          // A-B (가로) 수정: A,D는 왼쪽으로, B,C는 오른쪽으로
+          const currentLength = Math.hypot(B.xMm - A.xMm, B.yMm - A.yMm);
+          if (currentLength < 1) return prev;
+          const delta = (targetLength - currentLength) / 2;
+          const dirX = (B.xMm - A.xMm) / currentLength;
+          const dirY = (B.yMm - A.yMm) / currentLength;
+          
+          newPoints = [
+            { xMm: A.xMm - dirX * delta, yMm: A.yMm - dirY * delta },
+            { xMm: B.xMm + dirX * delta, yMm: B.yMm + dirY * delta },
+            { xMm: C.xMm + dirX * delta, yMm: C.yMm + dirY * delta },
+            { xMm: D.xMm - dirX * delta, yMm: D.yMm - dirY * delta },
+          ];
+        } else if (startIndex === 1) {
+          // B-C (세로) 수정: A,B는 위로, D,C는 아래로
+          const currentLength = Math.hypot(C.xMm - B.xMm, C.yMm - B.yMm);
+          if (currentLength < 1) return prev;
+          const delta = (targetLength - currentLength) / 2;
+          const dirX = (C.xMm - B.xMm) / currentLength;
+          const dirY = (C.yMm - B.yMm) / currentLength;
+          
+          newPoints = [
+            { xMm: A.xMm - dirX * delta, yMm: A.yMm - dirY * delta },
+            { xMm: B.xMm - dirX * delta, yMm: B.yMm - dirY * delta },
+            { xMm: C.xMm + dirX * delta, yMm: C.yMm + dirY * delta },
+            { xMm: D.xMm + dirX * delta, yMm: D.yMm + dirY * delta },
+          ];
+        } else {
+          return prev;
+        }
+        
+        didUpdate = true;
+        return { ...prev, polygon: { ...prev.polygon, outer: newPoints } };
+      }
+      
+      // 직사각형이 아닌 경우 기존 로직
+      const updatedOuter = updateEdgeLength(points, startIndex, targetLength, {
         minLengthMm: MIN_EDGE_SPAN_MM,
       });
       if (!updatedOuter) return prev;
@@ -233,7 +326,8 @@ export default function App() {
       return { ...prev, polygon: { ...prev.polygon, outer: updatedOuter } };
     });
     return didUpdate;
-  }, []);
+  }, [shapeType]);
+
 
   // --- Gate screen
   if (mode === null) {
@@ -315,12 +409,10 @@ export default function App() {
           if (!target) return false;
           return handleEdgeLengthChange(target.startIndex, lengthMm);
         }}
-        isRoundedEnabled={isRoundedEnabled}
-        cornerRadiusMm={cornerRadiusMm}
-        onRadiusChange={setCornerRadiusMm}
-        onToggleRounding={() => setIsRoundedEnabled((v) => !v)}
         onToggleResults={() => setShowResults((v) => !v)}
           showResults={showResults}
+          viewMode={viewMode}
+          onChangeViewMode={setViewMode}
         />
 
         <section className="canvas-pane">
@@ -331,8 +423,8 @@ export default function App() {
                 polygon={plan.polygon}
                 viewMode={viewMode}
                 onChangePolygon={handlePolygonChange}
-                isRoundedEnabled={isRoundedEnabled}
-                cornerRadiusMm={cornerRadiusMm}
+                onSelectShape={(shapeId) => applyPresetShape(shapeId as ShapeType)}
+                structureLayout={out.structureLayout}
                 shapeType={shapeType}
               />
             </div>

@@ -129,18 +129,34 @@ body {
 }
 
 .shape-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
-  gap: 10px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: flex-start;
 }
 
 .shape-button {
-  padding: 12px 10px;
+  flex: 1 1 calc(33.333% - 6px); /* 기본: 3개씩 한 줄 */
+  max-width: calc(33.333% - 6px);
+  padding: 10px 14px;
   border-radius: 12px;
   border: 1px solid #cfd5e3;
   background: #f6f7fb;
   font-weight: 600;
   cursor: pointer;
+  color: #000;
+  white-space: nowrap;
+  font-size: 13px;
+  text-align: center;
+  box-sizing: border-box;
+}
+
+/* 작은 화면에서는 수직 배열 */
+@media (max-width: 500px) {
+  .shape-button {
+    flex: 1 1 100%;
+    max-width: 100%;
+  }
 }
 
 .shape-button.is-active {
@@ -179,6 +195,7 @@ body {
   background: #fff;
   font-size: 13px;
   text-align: right;
+  color: rgba(0, 0, 0, 1);
 }
 
 .dimension-input:focus {

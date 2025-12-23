@@ -1,4 +1,4 @@
-import type { Point, Polygon } from "./types";
+import type { Point, Polygon, LineSegment } from "./types";
 
 export function degToRad(deg: number): number {
   return (deg * Math.PI) / 180;
@@ -108,4 +108,110 @@ export function polygonSpanAtX(poly: Polygon, x: number): number {
     holes: poly.holes?.map(swap)
   };
   return polygonSpanAtY(swapped, x);
+}
+
+// --- Point in Polygon & Grid Generation ---
+
+function isPointInRing(p: Point, ring: Point[]): boolean {
+  let inside = false;
+  const n = ring.length;
+  for (let i = 0, j = n - 1; i < n; j = i++) {
+    const pi = ring[i];
+    const pj = ring[j];
+
+    const intersect =
+      pi.yMm > p.yMm !== pj.yMm > p.yMm &&
+      p.xMm < ((pj.xMm - pi.xMm) * (p.yMm - pi.yMm)) / (pj.yMm - pi.yMm) + pi.xMm;
+
+    if (intersect) inside = !inside;
+  }
+  return inside;
+}
+
+export function isPointInPolygon(p: Point, poly: Polygon): boolean {
+  if (!isPointInRing(p, poly.outer)) return false;
+  if (poly.holes) {
+    for (const h of poly.holes) {
+      if (isPointInRing(p, h)) return false;
+    }
+  }
+  return true;
+}
+
+
+/**
+ * 특정 간격으로 그리드 라인을 생성하고, 다각형 내부에 포함된 선분들만 반환
+ * axis: 'x' -> 수직선 (x=const), 'y' -> 수평선 (y=const)
+ */
+export function getClippedGridLines(
+  poly: Polygon,
+  spacingMm: number,
+  axis: "x" | "y"
+): LineSegment[] {
+  const bb = bbox(poly.outer);
+  const min = axis === "x" ? bb.minX : bb.minY;
+  const max = axis === "x" ? bb.maxX : bb.maxY;
+  
+  const eps = 0.5;
+  let pos = min + eps;
+  
+  const segments: LineSegment[] = [];
+
+  while (pos <= max - eps) {
+    let intersectionPoints: number[] = [];
+    
+    if (axis === "y") {
+      // 수평선 (y=const)
+      intersectionPoints = intersectionsWithHorizontalScan(poly.outer, pos);
+    } else {
+       // 수직선 (x=const) -> Y좌표 교차점 구하기 위해 스왑
+       const swap = (ring: Point[]) => ring.map(p => ({ xMm: p.yMm, yMm: p.xMm }));
+       const swappedOuter = swap(poly.outer);
+       intersectionPoints = intersectionsWithHorizontalScan(swappedOuter, pos);
+    }
+    
+    // 구간별 Hole 처리
+    for (let i = 0; i + 1 < intersectionPoints.length; i += 2) {
+      const start = intersectionPoints[i];
+      const end = intersectionPoints[i+1];
+      
+      let currentSegments = [{s: start, e: end}];
+      
+      if (poly.holes && poly.holes.length > 0) {
+        for (const hole of poly.holes) {
+          const holeRing = axis === "x" ? hole.map(p => ({ xMm: p.yMm, yMm: p.xMm })) : hole;
+          const holeIntersections = intersectionsWithHorizontalScan(holeRing, pos);
+          
+          for (let h = 0; h + 1 < holeIntersections.length; h += 2) {
+             const hStart = holeIntersections[h];
+             const hEnd = holeIntersections[h+1];
+             
+             const nextSegments: { s: number; e: number }[] = [];
+             for (const seg of currentSegments) {
+                // seg: [s, e], hole: [hs, he]
+                if (seg.e <= hStart || seg.s >= hEnd) {
+                   nextSegments.push(seg);
+                } else {
+                   if (seg.s < hStart) nextSegments.push({ s: seg.s, e: hStart });
+                   if (seg.e > hEnd) nextSegments.push({ s: hEnd, e: seg.e });
+                }
+             }
+             currentSegments = nextSegments;
+          }
+        }
+      }
+      
+      for (const seg of currentSegments) {
+         if (axis === "y") {
+            segments.push({ x1: seg.s, y1: pos, x2: seg.e, y2: pos });
+         } else {
+            segments.push({ x1: pos, y1: seg.s, x2: pos, y2: seg.e });
+         }
+      }
+    }
+
+    pos += spacingMm;
+  }
+  
+  return segments;
 }
