@@ -103,6 +103,42 @@ body {
   display: flex;
   align-items: stretch;
   overflow: hidden;
+  position: relative; /* For absolute positioning of overlay UI */
+  touch-action: none; /* Critical for touch drawing */
+}
+
+@media (max-width: 768px) {
+  .app-body {
+    display: flex; /* Switch from grid to flex column */
+    flex-direction: column;
+    padding: 12px;
+    gap: 12px;
+  }
+
+  /* Reorder: Canvas (visual) first, Controls (inputs) second */
+  .canvas-pane {
+    order: 1;
+    flex: 1.2; /* Give slightly more space to canvas */
+    border-radius: 16px;
+    height: 400px;
+  }
+
+  .controls-pane {
+    order: 2;
+    flex: 1;
+    border-radius: 16px 16px 0 0; /* Slightly different look for bottom sheet feel maybe? */
+    /* Ensure it doesn't get too small */
+    min-height: 200px; 
+  }
+
+  .app-header {
+    padding: 8px 16px;
+    min-height: 50px;
+  }
+
+  .app-header h1 {
+    font-size: 18px;
+  }
 }
 
 .accordion-section + .accordion-section {

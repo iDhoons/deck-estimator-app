@@ -51,7 +51,7 @@ export function useHistory<T>(initialPresent: T) {
     const set = useCallback(
         (newPresent: T | ((current: T) => T)) => {
             setState((prevState) => {
-                const { past, present, future } = prevState;
+                const { past, present } = prevState;
                 const nextPresent =
                     typeof newPresent === "function"
                         ? (newPresent as (current: T) => T)(present)

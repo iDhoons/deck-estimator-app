@@ -1,6 +1,6 @@
 import type { Plan } from "@deck/core";
-import { type ShapeType } from "../App";
-import { type CutoutMeta } from "../components/ControlsPanel";
+import { type ShapeType } from "../types";
+import { type CutoutMeta } from "../geometry/cutouts";
 
 export type ProjectState = {
     plan: Plan;

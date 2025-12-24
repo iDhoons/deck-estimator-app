@@ -1,5 +1,6 @@
 import {
   useCallback,
+  useEffect,
   useMemo,
   useRef,
   useState,
@@ -10,16 +11,21 @@ import type { Point } from "@deck/core";
 
 const VIEWBOX = { width: 2000, height: 1200 };
 const GRID_SIZE = 100; // 100mm grid
-const CLOSE_RADIUS = 20; // 20mm close threshold
+const CLOSE_RADIUS = 50; // 50mm close threshold (increased from 20mm)
+const VERTEX_RADIUS = 8; // Vertex handle size
 
 function snapToGrid(value: number, gridSize: number): number {
   return Math.round(value / gridSize) * gridSize;
 }
 
 export function FreeDrawCanvas({
+  initialPoints = [],
   onPolygonComplete,
+  onPolygonChange,
 }: {
+  initialPoints?: Point[];
   onPolygonComplete?: (points: Point[]) => void;
+  onPolygonChange?: (points: Point[]) => void;
 }) {
   const svgRef = useRef<SVGSVGElement | null>(null);
   const [viewBox, setViewBox] = useState({ x: 0, y: 0, w: VIEWBOX.width, h: VIEWBOX.height });
@@ -32,12 +38,22 @@ export function FreeDrawCanvas({
   const panStartViewBoxRef = useRef<{ x: number; y: number } | null>(null);
   const panScaleRef = useRef<{ x: number; y: number } | null>(null);
 
-  // Draft state: points being drawn
-  const [draftPoints, setDraftPoints] = useState<Point[]>([]);
+  // Drawing state: points being drawn or edited
+  const [points, setPoints] = useState<Point[]>(initialPoints);
+  const [isClosed, setIsClosed] = useState(initialPoints.length >= 3);
 
-  // Final shapes: completed polygons
-  const [finalShapes, setFinalShapes] = useState<Point[][]>([]);
-  const drawingLocked = finalShapes.length > 0;
+  // Editing state
+  const [dragVertexIndex, setDragVertexIndex] = useState<number | null>(null);
+  const [hoverVertexIndex, setHoverVertexIndex] = useState<number | null>(null);
+  const [isHoveringStartPoint, setIsHoveringStartPoint] = useState(false);
+
+  // Sync with external initialPoints changes
+  useEffect(() => {
+    if (initialPoints.length > 0 && points.length === 0) {
+      setPoints(initialPoints);
+      setIsClosed(initialPoints.length >= 3);
+    }
+  }, [initialPoints, points.length]);
 
   const centerX = useMemo(() => viewBox.x + viewBox.w / 2, [viewBox]);
   const centerY = useMemo(() => viewBox.y + viewBox.h / 2, [viewBox]);
@@ -84,63 +100,139 @@ export function FreeDrawCanvas({
     setRotation(0);
   }, []);
 
-  const controls = [
-    { key: "rotate", label: "회전", onClick: () => setRotation((prev) => (prev + 15) % 360) },
-    { key: "center", label: "중앙 맞추기", onClick: centerView },
-    { key: "zoom-out", label: "축소", onClick: () => setScale((prev) => Math.max(0.2, prev * 0.9)) },
-    { key: "zoom-in", label: "확대", onClick: () => setScale((prev) => Math.min(5, prev * 1.1)) },
-    {
-      key: "clear",
-      label: "지우기",
-      onClick: () => {
-        setDraftPoints([]);
-        setFinalShapes([]);
-      },
+  const handleClear = useCallback(() => {
+    setPoints([]);
+    setIsClosed(false);
+    setDragVertexIndex(null);
+    setHoverVertexIndex(null);
+    setIsHoveringStartPoint(false);
+    if (onPolygonChange) {
+      onPolygonChange([]);
+    }
+  }, [onPolygonChange]);
+
+  const handleDeleteVertex = useCallback(
+    (index: number) => {
+      if (points.length <= 3) {
+        // Can't delete if we'd have less than 3 points
+        handleClear();
+        return;
+      }
+      const newPoints = points.filter((_, i) => i !== index);
+      setPoints(newPoints);
+      if (onPolygonChange) {
+        onPolygonChange(newPoints);
+      }
     },
-  ];
+    [points, handleClear, onPolygonChange]
+  );
+
+  const controls = useMemo(() => {
+    const baseControls = [
+      { key: "rotate", label: "회전", onClick: () => setRotation((prev) => (prev + 15) % 360) },
+      { key: "center", label: "중앙 맞추기", onClick: centerView },
+      { key: "zoom-out", label: "축소", onClick: () => setScale((prev) => Math.max(0.2, prev * 0.9)) },
+      { key: "zoom-in", label: "확대", onClick: () => setScale((prev) => Math.min(5, prev * 1.1)) },
+      { key: "clear", label: "지우기", onClick: handleClear },
+    ];
+
+    if (isClosed) {
+      baseControls.push({
+        key: "reopen",
+        label: "다시 그리기",
+        onClick: () => {
+          setIsClosed(false);
+        },
+      });
+    }
+
+    return baseControls;
+  }, [centerView, handleClear, isClosed]);
 
   const handleCanvasClick = useCallback(
     (event: ReactPointerEvent<SVGSVGElement>) => {
-      if (drawingLocked) return;
+      if (isClosed) return; // No adding points when closed
       if (isPanning) return;
       if (panPointerIdRef.current !== null) return;
+      if (dragVertexIndex !== null) return;
 
       const world = toWorldCoords(event.clientX, event.clientY);
       if (!world) return;
 
       // Snap to grid
+      let snappedX = snapToGrid(world.x, GRID_SIZE);
+      let snappedY = snapToGrid(world.y, GRID_SIZE);
+
+      // Orthogonal mode (Shift key)
+      if (event.shiftKey && points.length > 0) {
+        const lastPoint = points[points.length - 1];
+        const dx = Math.abs(snappedX - lastPoint.xMm);
+        const dy = Math.abs(snappedY - lastPoint.yMm);
+        if (dx > dy) {
+          snappedY = lastPoint.yMm; // Lock horizontal
+        } else {
+          snappedX = lastPoint.xMm; // Lock vertical
+        }
+      }
+
       const snappedPoint: Point = {
-        xMm: snapToGrid(world.x, GRID_SIZE),
-        yMm: snapToGrid(world.y, GRID_SIZE),
+        xMm: snappedX,
+        yMm: snappedY,
       };
 
-      // Check if we're closing the polygon
-      if (draftPoints.length >= 2) {
-        const first = draftPoints[0];
+      // Check if we're closing the polygon (near first point)
+      if (points.length >= 3) {
+        const first = points[0];
         const dx = snappedPoint.xMm - first.xMm;
         const dy = snappedPoint.yMm - first.yMm;
         const distance = Math.sqrt(dx * dx + dy * dy);
 
         if (distance <= CLOSE_RADIUS) {
           // Close the polygon
-          const completedShape = [...draftPoints];
-          setFinalShapes((prev) => [...prev, completedShape]);
+          setIsClosed(true);
           if (onPolygonComplete) {
-            onPolygonComplete(completedShape);
+            onPolygonComplete(points);
           }
-          setDraftPoints([]);
           return;
         }
       }
 
-      // Add point to draft
-      setDraftPoints((prev) => [...prev, snappedPoint]);
+      // Add point
+      const newPoints = [...points, snappedPoint];
+      setPoints(newPoints);
+      if (onPolygonChange) {
+        onPolygonChange(newPoints);
+      }
     },
-    [draftPoints, drawingLocked, isPanning, onPolygonComplete, toWorldCoords]
+    [points, isClosed, isPanning, dragVertexIndex, onPolygonComplete, onPolygonChange, toWorldCoords]
+  );
+
+  const handleVertexPointerDown = useCallback(
+    (index: number, event: ReactPointerEvent<SVGCircleElement>) => {
+      event.stopPropagation();
+
+      // Check for close action on first vertex when drawing
+      if (!isClosed && index === 0 && points.length >= 3) {
+        setIsClosed(true);
+        if (onPolygonComplete) {
+          onPolygonComplete(points);
+        }
+        return;
+      }
+
+      // Start dragging vertex
+      if (isClosed || points.length >= 3) {
+        event.preventDefault();
+        setDragVertexIndex(index);
+        svgRef.current?.setPointerCapture?.(event.pointerId);
+      }
+    },
+    [isClosed, points, onPolygonComplete]
   );
 
   const handlePointerMove = useCallback(
     (event: ReactPointerEvent<SVGSVGElement>) => {
+      // Handle panning
       if (
         panPointerIdRef.current !== null &&
         panStartClientRef.current &&
@@ -158,9 +250,57 @@ export function FreeDrawCanvas({
           w: viewBox.w,
           h: viewBox.h,
         });
+        return;
+      }
+
+      // Handle vertex dragging
+      if (dragVertexIndex !== null) {
+        const world = toWorldCoords(event.clientX, event.clientY);
+        if (!world) return;
+
+        let snappedX = snapToGrid(world.x, GRID_SIZE);
+        let snappedY = snapToGrid(world.y, GRID_SIZE);
+
+        // Orthogonal mode (Shift key)
+        if (event.shiftKey && points.length > 1) {
+          const prevIndex = dragVertexIndex === 0 ? points.length - 1 : dragVertexIndex - 1;
+          const prevPoint = points[prevIndex];
+          const dx = Math.abs(snappedX - prevPoint.xMm);
+          const dy = Math.abs(snappedY - prevPoint.yMm);
+          if (dx > dy) {
+            snappedY = prevPoint.yMm;
+          } else {
+            snappedX = prevPoint.xMm;
+          }
+        }
+
+        const newPoints = points.map((p, i) =>
+          i === dragVertexIndex ? { xMm: snappedX, yMm: snappedY } : p
+        );
+        setPoints(newPoints);
+        if (onPolygonChange) {
+          onPolygonChange(newPoints);
+        }
+        return;
+      }
+
+      // Check if hovering near start point (for closing indicator)
+      if (!isClosed && points.length >= 3) {
+        const world = toWorldCoords(event.clientX, event.clientY);
+        if (world) {
+          const snappedX = snapToGrid(world.x, GRID_SIZE);
+          const snappedY = snapToGrid(world.y, GRID_SIZE);
+          const first = points[0];
+          const dx = snappedX - first.xMm;
+          const dy = snappedY - first.yMm;
+          const dist = Math.sqrt(dx * dx + dy * dy);
+          setIsHoveringStartPoint(dist <= CLOSE_RADIUS);
+        }
+      } else {
+        setIsHoveringStartPoint(false);
       }
     },
-    [viewBox.h, viewBox.w]
+    [viewBox.h, viewBox.w, dragVertexIndex, points, isClosed, toWorldCoords, onPolygonChange]
   );
 
   const startPan = useCallback(
@@ -200,7 +340,11 @@ export function FreeDrawCanvas({
       panScaleRef.current = null;
       setIsPanning(false);
     }
-  }, []);
+
+    if (dragVertexIndex !== null) {
+      setDragVertexIndex(null);
+    }
+  }, [dragVertexIndex]);
 
   const handleWheel = useCallback((event: ReactWheelEvent<SVGSVGElement>) => {
     event.preventDefault();
@@ -229,6 +373,14 @@ export function FreeDrawCanvas({
     return lines;
   }, [viewBox]);
 
+  const getCursor = useCallback(() => {
+    if (isPanning) return "grabbing";
+    if (dragVertexIndex !== null) return "grabbing";
+    if (isClosed) return "default";
+    if (isHoveringStartPoint) return "pointer";
+    return "crosshair";
+  }, [isPanning, dragVertexIndex, isClosed, isHoveringStartPoint]);
+
   return (
     <svg
       ref={svgRef}
@@ -239,10 +391,10 @@ export function FreeDrawCanvas({
         border: "1px solid #ddd",
         background: "#fafafa",
         display: "block",
-        cursor: isPanning ? "grabbing" : drawingLocked ? "not-allowed" : "crosshair",
+        cursor: getCursor(),
       }}
       onPointerDown={(e) => {
-        if (e.button === 0) {
+        if (e.button === 0 && dragVertexIndex === null) {
           handleCanvasClick(e);
         } else {
           startPan(e);
@@ -270,88 +422,89 @@ export function FreeDrawCanvas({
       </g>
 
       <g transform={transformGroup}>
-        {/* Final shapes layer */}
-        {finalShapes.map((shape, shapeIdx) => (
-          <polygon
-            key={`shape-${shapeIdx}`}
-            points={shape.map((p) => `${p.xMm},${p.yMm}`).join(" ")}
-            fill="rgba(80,160,255,0.2)"
-            stroke="#5af"
-            strokeWidth={4}
-            pointerEvents="none"
-          />
-        ))}
+        {/* Polygon or polyline */}
+        {points.length >= 2 && (
+          <>
+            {isClosed ? (
+              <polygon
+                points={points.map((p) => `${p.xMm},${p.yMm}`).join(" ")}
+                fill="rgba(80,160,255,0.12)"
+                stroke="#5af"
+                strokeWidth={4}
+                strokeLinejoin="miter"
+                strokeLinecap="square"
+                pointerEvents="none"
+              />
+            ) : (
+              <polyline
+                points={points.map((p) => `${p.xMm},${p.yMm}`).join(" ")}
+                fill="none"
+                stroke="#2463ff"
+                strokeWidth={3}
+                strokeDasharray="8,4"
+                pointerEvents="none"
+              />
+            )}
+          </>
+        )}
 
-        {/* Draft layer */}
-        {draftPoints.length === 1 && (
+        {/* Single point */}
+        {points.length === 1 && (
           <circle
-            cx={draftPoints[0].xMm}
-            cy={draftPoints[0].yMm}
+            cx={points[0].xMm}
+            cy={points[0].yMm}
             r={6}
             fill="#2463ff"
             pointerEvents="none"
           />
         )}
 
-        {draftPoints.length === 2 && (
-          <>
-            <polyline
-              points={draftPoints.map((p) => `${p.xMm},${p.yMm}`).join(" ")}
-              fill="none"
-              stroke="#2463ff"
-              strokeWidth={3}
-              strokeDasharray="8,4"
-              pointerEvents="none"
-            />
-            {draftPoints.map((p, i) => (
-              <circle
-                key={i}
-                cx={p.xMm}
-                cy={p.yMm}
-                r={6}
-                fill="#2463ff"
-                pointerEvents="none"
-              />
-            ))}
-          </>
-        )}
+        {/* Vertex handles */}
+        {points.map((p, i) => {
+          const isFirst = i === 0;
+          const isHovered = hoverVertexIndex === i;
+          const showCloseIndicator = !isClosed && isFirst && points.length >= 3;
 
-        {draftPoints.length >= 3 && (
-          <>
-            <polygon
-              points={draftPoints.map((p) => `${p.xMm},${p.yMm}`).join(" ")}
-              fill="rgba(36,99,255,0.15)"
-              stroke="#2463ff"
-              strokeWidth={3}
-              strokeDasharray="8,4"
-              pointerEvents="none"
-            />
-            {draftPoints.map((p, i) => (
+          return (
+            <g key={i}>
+              {/* Close indicator circle on first vertex */}
+              {showCloseIndicator && (
+                <circle
+                  cx={p.xMm}
+                  cy={p.yMm}
+                  r={CLOSE_RADIUS}
+                  fill="none"
+                  stroke="#2463ff"
+                  strokeWidth={1}
+                  strokeDasharray="4,4"
+                  opacity={0.5}
+                  pointerEvents="none"
+                />
+              )}
+
+              {/* Vertex handle */}
               <circle
-                key={i}
                 cx={p.xMm}
                 cy={p.yMm}
-                r={6}
-                fill="#2463ff"
-                stroke="#fff"
+                r={VERTEX_RADIUS}
+                fill={isHovered ? "#2463ff" : "#fff"}
+                stroke="#2463ff"
                 strokeWidth={2}
-                pointerEvents="none"
+                style={{ cursor: isClosed || points.length >= 3 ? "pointer" : "default" }}
+                onPointerEnter={() => setHoverVertexIndex(i)}
+                onPointerLeave={() => setHoverVertexIndex(null)}
+                onPointerDown={(e) => handleVertexPointerDown(i, e)}
+                onContextMenu={(e) => {
+                  if (isClosed) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    handleDeleteVertex(i);
+                  }
+                }}
               />
-            ))}
-            {/* Show close indicator on first point */}
-            <circle
-              cx={draftPoints[0].xMm}
-              cy={draftPoints[0].yMm}
-              r={CLOSE_RADIUS}
-              fill="none"
-              stroke="#2463ff"
-              strokeWidth={1}
-              strokeDasharray="4,4"
-              opacity={0.5}
-              pointerEvents="none"
-            />
-          </>
-        )}
+            </g>
+          );
+        })}
       </g>
 
       {/* Controls */}
@@ -402,10 +555,14 @@ export function FreeDrawCanvas({
         fontSize={16}
         pointerEvents="none"
       >
-        왼쪽 클릭: 점 추가 | 첫 점 근처 클릭: 도형 완성 | 오른쪽 클릭: 이동
+        {isClosed
+          ? "완성됨 | 꼭지점 드래그: 이동 | 우클릭: 삭제 | 오른쪽/중간 버튼: 캔버스 이동"
+          : points.length >= 3
+            ? "클릭: 점 추가 | 첫 점 클릭/근처 클릭: 완성 | Shift: 직교 모드"
+            : "클릭: 점 추가 | Shift: 직교 모드 | 오른쪽/중간 버튼: 캔버스 이동"}
       </text>
 
-      {draftPoints.length > 0 && (
+      {points.length > 0 && (
         <text
           x={viewBox.x + 20}
           y={viewBox.y + 55}
@@ -413,19 +570,7 @@ export function FreeDrawCanvas({
           fontSize={14}
           pointerEvents="none"
         >
-          점 개수: {draftPoints.length}
-        </text>
-      )}
-
-      {drawingLocked && (
-        <text
-          x={viewBox.x + 20}
-          y={viewBox.y + 80}
-          fill="#c00"
-          fontSize={14}
-          pointerEvents="none"
-        >
-          도형이 완성되었습니다. 새로 그리려면 지우기를 눌러주세요.
+          점 개수: {points.length}
         </text>
       )}
     </svg>

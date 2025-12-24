@@ -1,3 +1,4 @@
+/* eslint-disable react-hooks/set-state-in-effect */
 import { useEffect, useMemo, useState } from "react";
 import { EDGE_LENGTH_STEP_MM, MIN_EDGE_SPAN_MM } from "../geometry/edges";
 
@@ -14,7 +15,7 @@ type DimensionItem = {
   endIndex: number;
 };
 
-export type CutoutShape = "rectangle" | "circle" | "free";
+import { type CutoutShape } from "../types";
 
 type StairConfig = {
   id: string;
@@ -155,7 +156,7 @@ export function ControlsPanel({
       next[`${item.id}-depth`] = String(Math.round(item.stepDepthMm));
       next[`${item.id}-height`] = String(Math.round(item.stepHeightMm));
     }
-    
+
     // Stringer overrides
     const overrides = stairs?.stringerMaterialOverrides;
     if (overrides) {
@@ -575,7 +576,7 @@ export function ControlsPanel({
         <div style={{ display: "grid", gap: 8 }}>
           {(stairs?.items ?? []).map((item, index) => {
             const isOpen = !!stairOpenMap[item.id];
-            
+
             const updateItem = (partial: Partial<StairConfig>) => {
               if (!stairs || !onChangeStairs) return;
               const nextItems = stairs.items.map((it) => (it.id === item.id ? { ...it, ...partial } : it));
@@ -584,7 +585,7 @@ export function ControlsPanel({
 
             const getField = (key: string) => stairInputs[`${item.id}-${key}`] ?? "";
             const setField = (key: string, v: string) => setStairInputs((prev) => ({ ...prev, [`${item.id}-${key}`]: v }));
-            
+
             const commitField = (key: "start" | "width" | "depth" | "height") => {
               const raw = getField(key);
               const val = Number(raw.replace(/,/g, ""));
@@ -593,7 +594,7 @@ export function ControlsPanel({
                 setField(key, String(Math.round(key === "start" ? item.startMm : key === "width" ? item.widthMm : key === "depth" ? item.stepDepthMm : item.stepHeightMm)));
                 return;
               }
-              
+
               if (key === "start") updateItem({ startMm: val });
               else if (key === "width") updateItem({ widthMm: Math.max(100, val) });
               else if (key === "depth") updateItem({ stepDepthMm: Math.max(10, val) });
@@ -665,7 +666,7 @@ export function ControlsPanel({
                         style={{ padding: "4px 8px", borderRadius: 6, borderColor: "#ccc" }}
                       >
                         {dimensions.map((dim) => (
-                           <option key={dim.id} value={dim.startIndex}>{dim.label}</option>
+                          <option key={dim.id} value={dim.startIndex}>{dim.label}</option>
                         ))}
                       </select>
                     </div>
@@ -697,47 +698,47 @@ export function ControlsPanel({
                     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                       <span style={{ fontSize: 13, color: "#555" }}>단 수</span>
                       <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                         <button
-                           type="button"
-                           onClick={() => updateItem({ stepCount: Math.max(1, item.stepCount - 1) })}
-                           style={{ width: 28, height: 28, borderRadius: 4, border: "1px solid #ccc", background: "#f0f0f0" }}
-                         >−</button>
-                         <span style={{ fontWeight: 700 }}>{item.stepCount}</span>
-                         <button
-                           type="button"
-                           onClick={() => updateItem({ stepCount: Math.min(30, item.stepCount + 1) })}
-                           style={{ width: 28, height: 28, borderRadius: 4, border: "1px solid #ccc", background: "#f0f0f0" }}
-                         >+</button>
+                        <button
+                          type="button"
+                          onClick={() => updateItem({ stepCount: Math.max(1, item.stepCount - 1) })}
+                          style={{ width: 28, height: 28, borderRadius: 4, border: "1px solid #ccc", background: "#f0f0f0" }}
+                        >−</button>
+                        <span style={{ fontWeight: 700 }}>{item.stepCount}</span>
+                        <button
+                          type="button"
+                          onClick={() => updateItem({ stepCount: Math.min(30, item.stepCount + 1) })}
+                          style={{ width: 28, height: 28, borderRadius: 4, border: "1px solid #ccc", background: "#f0f0f0" }}
+                        >+</button>
                       </div>
                     </div>
 
                     <div style={{ fontWeight: 600, color: "#333", marginTop: 4 }}>단 치수</div>
 
                     <div style={{ display: "flex", gap: 10 }}>
-                        <div style={{ flex: 1 }}>
-                          <div style={{ fontSize: 12, color: "#666", marginBottom: 4 }}>깊이 (mm)</div>
-                          <input
-                            type="text"
-                            inputMode="decimal"
-                            value={getField("depth")}
-                            onChange={(e) => setField("depth", e.target.value)}
-                            onBlur={() => commitField("depth")}
-                            style={{ width: "100%", padding: "6px 8px", borderRadius: 6, border: "1px solid #ccc" }}
-                          />
-                        </div>
-                        <div style={{ flex: 1 }}>
-                          <div style={{ fontSize: 12, color: "#666", marginBottom: 4 }}>높이 (mm)</div>
-                          <input
-                            type="text"
-                            inputMode="decimal"
-                            value={getField("height")}
-                            onChange={(e) => setField("height", e.target.value)}
-                            onBlur={() => commitField("height")}
-                            style={{ width: "100%", padding: "6px 8px", borderRadius: 6, border: "1px solid #ccc" }}
-                          />
-                        </div>
+                      <div style={{ flex: 1 }}>
+                        <div style={{ fontSize: 12, color: "#666", marginBottom: 4 }}>깊이 (mm)</div>
+                        <input
+                          type="text"
+                          inputMode="decimal"
+                          value={getField("depth")}
+                          onChange={(e) => setField("depth", e.target.value)}
+                          onBlur={() => commitField("depth")}
+                          style={{ width: "100%", padding: "6px 8px", borderRadius: 6, border: "1px solid #ccc" }}
+                        />
+                      </div>
+                      <div style={{ flex: 1 }}>
+                        <div style={{ fontSize: 12, color: "#666", marginBottom: 4 }}>높이 (mm)</div>
+                        <input
+                          type="text"
+                          inputMode="decimal"
+                          value={getField("height")}
+                          onChange={(e) => setField("height", e.target.value)}
+                          onBlur={() => commitField("height")}
+                          style={{ width: "100%", padding: "6px 8px", borderRadius: 6, border: "1px solid #ccc" }}
+                        />
+                      </div>
                     </div>
-                    
+
                     <label style={{ display: "flex", gap: 8, alignItems: "center" }}>
                       <input
                         type="checkbox"
@@ -771,15 +772,15 @@ export function ControlsPanel({
                 value={stairInputs["str-thk"] ?? ""}
                 onChange={(e) => setStairInputs((p) => ({ ...p, "str-thk": e.target.value }))}
                 onBlur={() => {
-                   if (!stairs || !onChangeStairs) return;
-                   const val = Number((stairInputs["str-thk"] ?? "").replace(/,/g, ""));
-                   onChangeStairs({
-                     ...stairs,
-                     stringerMaterialOverrides: {
-                       ...stairs.stringerMaterialOverrides,
-                       thicknessMm: (val > 0) ? val : undefined
-                     }
-                   });
+                  if (!stairs || !onChangeStairs) return;
+                  const val = Number((stairInputs["str-thk"] ?? "").replace(/,/g, ""));
+                  onChangeStairs({
+                    ...stairs,
+                    stringerMaterialOverrides: {
+                      ...stairs.stringerMaterialOverrides,
+                      thicknessMm: (val > 0) ? val : undefined
+                    }
+                  });
                 }}
                 style={{ width: 100, padding: "6px 8px", borderRadius: 6, border: "1px solid #ccc" }}
               />
@@ -793,15 +794,15 @@ export function ControlsPanel({
                 value={stairInputs["str-wid"] ?? ""}
                 onChange={(e) => setStairInputs((p) => ({ ...p, "str-wid": e.target.value }))}
                 onBlur={() => {
-                   if (!stairs || !onChangeStairs) return;
-                   const val = Number((stairInputs["str-wid"] ?? "").replace(/,/g, ""));
-                   onChangeStairs({
-                     ...stairs,
-                     stringerMaterialOverrides: {
-                       ...stairs.stringerMaterialOverrides,
-                       widthMm: (val > 0) ? val : undefined
-                     }
-                   });
+                  if (!stairs || !onChangeStairs) return;
+                  const val = Number((stairInputs["str-wid"] ?? "").replace(/,/g, ""));
+                  onChangeStairs({
+                    ...stairs,
+                    stringerMaterialOverrides: {
+                      ...stairs.stringerMaterialOverrides,
+                      widthMm: (val > 0) ? val : undefined
+                    }
+                  });
                 }}
                 style={{ width: 100, padding: "6px 8px", borderRadius: 6, border: "1px solid #ccc" }}
               />
@@ -815,20 +816,20 @@ export function ControlsPanel({
                 value={stairInputs["str-len"] ?? ""}
                 onChange={(e) => setStairInputs((p) => ({ ...p, "str-len": e.target.value }))}
                 onBlur={() => {
-                   if (!stairs || !onChangeStairs) return;
-                   const val = Number((stairInputs["str-len"] ?? "").replace(/,/g, ""));
-                   onChangeStairs({
-                     ...stairs,
-                     stringerMaterialOverrides: {
-                       ...stairs.stringerMaterialOverrides,
-                       stockLengthMm: (val > 0) ? val : undefined
-                     }
-                   });
+                  if (!stairs || !onChangeStairs) return;
+                  const val = Number((stairInputs["str-len"] ?? "").replace(/,/g, ""));
+                  onChangeStairs({
+                    ...stairs,
+                    stringerMaterialOverrides: {
+                      ...stairs.stringerMaterialOverrides,
+                      stockLengthMm: (val > 0) ? val : undefined
+                    }
+                  });
                 }}
                 style={{ width: 100, padding: "6px 8px", borderRadius: 6, border: "1px solid #ccc" }}
               />
             </div>
-             <button
+            <button
               type="button"
               onClick={() => {
                 if (!stairs || !onChangeStairs) return;
@@ -874,115 +875,102 @@ export function ControlsPanel({
     onChangeSubstructureOverridesMm(next);
   };
 
-  const sections = useMemo(
-    () => [
-      { id: "floor", title: "평면도", content: floorPlanContent },
-      { id: "cutout", title: "개구부", content: cutoutContent },
-      { id: "steps", title: "계단 및 측면", content: stairsContent },
-      {
-        id: "decking",
-        title: "데크재",
-        content: (
-          <div style={{ display: "grid", gap: 12 }}>
-            {quickSummary("선호하는 데크재 형태와 마감을 선택하세요.")}
-            <button className="controls-action-button" type="button" onClick={onToggleResults}>
-              {showResults ? "결과 숨기기" : "결과 보기"}
+  const sections = [
+    { id: "floor", title: "평면도", content: floorPlanContent },
+    { id: "cutout", title: "개구부", content: cutoutContent },
+    { id: "steps", title: "계단 및 측면", content: stairsContent },
+    {
+      id: "decking",
+      title: "데크재",
+      content: (
+        <div style={{ display: "grid", gap: 12 }}>
+          {quickSummary("선호하는 데크재 형태와 마감을 선택하세요.")}
+          <button className="controls-action-button" type="button" onClick={onToggleResults}>
+            {showResults ? "결과 숨기기" : "결과 보기"}
+          </button>
+        </div>
+      ),
+    },
+    {
+      id: "edging",
+      title: "엣징",
+      content: quickSummary("노출된 측면을 마감할 페이시아 보드를 추가하세요."),
+    },
+    {
+      id: "laying",
+      title: "시공 옵션",
+      content: quickSummary("현장에 맞게 시공 각도와 방향을 조정하세요."),
+    },
+    {
+      id: "substructure",
+      title: "하부 구조",
+      content: (
+        <div style={{ display: "grid", gap: 10 }}>
+          {quickSummary("기본값은 자동 계산이며, 필요 시 총 길이를 수동으로 수정할 수 있습니다.")}
+
+          <div style={{ display: "grid", gap: 8 }}>
+            <div style={{ fontWeight: 600, color: "#333" }}>총 길이 오버라이드</div>
+
+            <div style={{ display: "flex", justifyContent: "space-between", gap: 8, alignItems: "center" }}>
+              <span style={{ fontSize: 13, color: "#555" }}>멍에 총 길이(mm)</span>
+              <input
+                type="text"
+                inputMode="decimal"
+                placeholder={substructureAuto ? `자동: ${Math.round(substructureAuto.primaryLenM * 1000)}` : "자동"}
+                value={subInputs.primary}
+                onChange={(e) => setSubInputs((p) => ({ ...p, primary: e.target.value }))}
+                onBlur={() => applySubOverride("primary")}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") e.currentTarget.blur();
+                  if (e.key === "Escape") {
+                    setSubInputs((p) => ({ ...p, primary: substructureOverridesMm?.primaryLenMm ? String(Math.round(substructureOverridesMm.primaryLenMm)) : "" }));
+                    e.currentTarget.blur();
+                  }
+                }}
+                style={{ width: 140, padding: "6px 8px", borderRadius: 6, border: "1px solid #ccc" }}
+              />
+            </div>
+
+            <div style={{ display: "flex", justifyContent: "space-between", gap: 8, alignItems: "center" }}>
+              <span style={{ fontSize: 13, color: "#555" }}>장선 총 길이(mm)</span>
+              <input
+                type="text"
+                inputMode="decimal"
+                placeholder={substructureAuto ? `자동: ${Math.round(substructureAuto.secondaryLenM * 1000)}` : "자동"}
+                value={subInputs.secondary}
+                onChange={(e) => setSubInputs((p) => ({ ...p, secondary: e.target.value }))}
+                onBlur={() => applySubOverride("secondary")}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") e.currentTarget.blur();
+                  if (e.key === "Escape") {
+                    setSubInputs((p) => ({ ...p, secondary: substructureOverridesMm?.secondaryLenMm ? String(Math.round(substructureOverridesMm.secondaryLenMm)) : "" }));
+                    e.currentTarget.blur();
+                  }
+                }}
+                style={{ width: 140, padding: "6px 8px", borderRadius: 6, border: "1px solid #ccc" }}
+              />
+            </div>
+
+            <button
+              type="button"
+              onClick={() => onChangeSubstructureOverridesMm?.({})}
+              style={{
+                marginTop: 4,
+                padding: "8px 10px",
+                borderRadius: 8,
+                border: "1px solid #ccc",
+                background: "#fff",
+                cursor: "pointer",
+                fontWeight: 700,
+              }}
+            >
+              자동값으로 되돌리기
             </button>
           </div>
-        ),
-      },
-      {
-        id: "edging",
-        title: "엣징",
-        content: quickSummary("노출된 측면을 마감할 페이시아 보드를 추가하세요."),
-      },
-      {
-        id: "laying",
-        title: "시공 옵션",
-        content: quickSummary("현장에 맞게 시공 각도와 방향을 조정하세요."),
-      },
-      {
-        id: "substructure",
-        title: "하부 구조",
-        content: (
-          <div style={{ display: "grid", gap: 10 }}>
-            {quickSummary("기본값은 자동 계산이며, 필요 시 총 길이를 수동으로 수정할 수 있습니다.")}
-
-            <div style={{ display: "grid", gap: 8 }}>
-              <div style={{ fontWeight: 600, color: "#333" }}>총 길이 오버라이드</div>
-
-              <div style={{ display: "flex", justifyContent: "space-between", gap: 8, alignItems: "center" }}>
-                <span style={{ fontSize: 13, color: "#555" }}>멍에 총 길이(mm)</span>
-                <input
-                  type="text"
-                  inputMode="decimal"
-                  placeholder={substructureAuto ? `자동: ${Math.round(substructureAuto.primaryLenM * 1000)}` : "자동"}
-                  value={subInputs.primary}
-                  onChange={(e) => setSubInputs((p) => ({ ...p, primary: e.target.value }))}
-                  onBlur={() => applySubOverride("primary")}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter") e.currentTarget.blur();
-                    if (e.key === "Escape") {
-                      setSubInputs((p) => ({ ...p, primary: substructureOverridesMm?.primaryLenMm ? String(Math.round(substructureOverridesMm.primaryLenMm)) : "" }));
-                      e.currentTarget.blur();
-                    }
-                  }}
-                  style={{ width: 140, padding: "6px 8px", borderRadius: 6, border: "1px solid #ccc" }}
-                />
-              </div>
-
-              <div style={{ display: "flex", justifyContent: "space-between", gap: 8, alignItems: "center" }}>
-                <span style={{ fontSize: 13, color: "#555" }}>장선 총 길이(mm)</span>
-                <input
-                  type="text"
-                  inputMode="decimal"
-                  placeholder={substructureAuto ? `자동: ${Math.round(substructureAuto.secondaryLenM * 1000)}` : "자동"}
-                  value={subInputs.secondary}
-                  onChange={(e) => setSubInputs((p) => ({ ...p, secondary: e.target.value }))}
-                  onBlur={() => applySubOverride("secondary")}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter") e.currentTarget.blur();
-                    if (e.key === "Escape") {
-                      setSubInputs((p) => ({ ...p, secondary: substructureOverridesMm?.secondaryLenMm ? String(Math.round(substructureOverridesMm.secondaryLenMm)) : "" }));
-                      e.currentTarget.blur();
-                    }
-                  }}
-                  style={{ width: 140, padding: "6px 8px", borderRadius: 6, border: "1px solid #ccc" }}
-                />
-              </div>
-
-              <button
-                type="button"
-                onClick={() => onChangeSubstructureOverridesMm?.({})}
-                style={{
-                  marginTop: 4,
-                  padding: "8px 10px",
-                  borderRadius: 8,
-                  border: "1px solid #ccc",
-                  background: "#fff",
-                  cursor: "pointer",
-                  fontWeight: 700,
-                }}
-              >
-                자동값으로 되돌리기
-              </button>
-            </div>
-          </div>
-        ),
-      },
-    ],
-    [
-      cutoutContent,
-      floorPlanContent,
-      onToggleResults,
-      showResults,
-      stairsContent,
-      subInputs.primary,
-      subInputs.secondary,
-      substructureAuto,
-      substructureOverridesMm,
-    ]
-  );
+        </div>
+      ),
+    },
+  ];
 
   return (
     <aside className="controls-pane left-layout">
