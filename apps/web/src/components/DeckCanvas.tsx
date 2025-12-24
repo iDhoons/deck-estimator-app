@@ -188,7 +188,15 @@ export function DeckCanvas({
   const [svgPxSize, setSvgPxSize] = useState<{ w: number; h: number }>({ w: 0, h: 0 });
   const [cutoutShape, setCutoutShape] = useState<CutoutShape>("rectangle");
   const [selectedHoleIndex, setSelectedHoleIndex] = useState<number | null>(null);
+  const [hoverHoleIndex, setHoverHoleIndex] = useState<number | null>(null);
+  const [isHoleMoving, setIsHoleMoving] = useState(false);
   const holeVertexDragRef = useRef<{ pointerId: number; holeIndex: number; vertexIndex: number } | null>(null);
+  const holeMoveDragRef = useRef<{
+    pointerId: number;
+    holeIndex: number;
+    startWorld: { x: number; y: number };
+    startHole: PlanPoint[];
+  } | null>(null);
   const cutoutDragRef = useRef<{ pointerId: number; shape: Exclude<CutoutShape, "free">; startWorld: { x: number; y: number } } | null>(null);
   const [draftCutoutPoints, setDraftCutoutPoints] = useState<PlanPoint[] | null>(null);
   const [draftFreeCutoutPoints, setDraftFreeCutoutPoints] = useState<PlanPoint[]>([]);
@@ -719,6 +727,24 @@ export function DeckCanvas({
         return;
       }
 
+      // Hole move drag (drag inside cutout to move whole hole)
+      if (holeMoveDragRef.current && onChangePolygon) {
+        const drag = holeMoveDragRef.current;
+        if (event.pointerId !== drag.pointerId) return;
+        const world = toWorldCoords(event.clientX, event.clientY);
+        if (!world) return;
+
+        const dx = world.x - drag.startWorld.x;
+        const dy = world.y - drag.startWorld.y;
+        const moved = drag.startHole.map((p) => ({ xMm: p.xMm + dx, yMm: p.yMm + dy }));
+        if (!moved.every(isPointInsideOuter)) return;
+
+        const holes = polygon.holes ?? [];
+        const nextHoles = holes.map((h, i) => (i === drag.holeIndex ? moved : h));
+        onChangePolygon({ ...polygon, holes: nextHoles });
+        return;
+      }
+
       // Cutout drag-create (rectangle/circle)
       if (cutoutDragRef.current && onChangePolygon) {
         const drag = cutoutDragRef.current;
@@ -956,6 +982,14 @@ export function DeckCanvas({
       }
       holeVertexDragRef.current = null;
     }
+
+      if (holeMoveDragRef.current && event.pointerId === holeMoveDragRef.current.pointerId) {
+        if (svg && svg.hasPointerCapture?.(holeMoveDragRef.current.pointerId)) {
+          svg.releasePointerCapture(holeMoveDragRef.current.pointerId);
+        }
+        holeMoveDragRef.current = null;
+        setIsHoleMoving(false);
+      }
 
     if (cutoutDragRef.current && event.pointerId === cutoutDragRef.current.pointerId) {
       if (svg && svg.hasPointerCapture?.(cutoutDragRef.current.pointerId)) {
@@ -1347,7 +1381,7 @@ export function DeckCanvas({
           background: "#fafafa",
           display: "block",
                   cursor:
-                    isPanning || isEdgeDragging
+                    isPanning || isEdgeDragging || isHoleMoving
                       ? "grabbing"
                       : activeTool === "delete"
                         ? "not-allowed"
@@ -1584,6 +1618,7 @@ export function DeckCanvas({
           {/* Holes (cutouts): draw as filled polygons to “punch out” the deck fill */}
           {(polygon.holes ?? []).map((hole, holeIndex) => {
             const isSelected = selectedHoleIndex === holeIndex;
+            const isHovered = hoverHoleIndex === holeIndex;
             return (
               <polygon
                 key={`hole-${holeIndex}`}
@@ -1593,12 +1628,35 @@ export function DeckCanvas({
                 strokeWidth={isSelected ? 4 : 3}
                 opacity={isSubView ? 0.5 : 1}
                 pointerEvents="all"
+                onPointerEnter={() => setHoverHoleIndex(holeIndex)}
+                onPointerLeave={() => setHoverHoleIndex((prev) => (prev === holeIndex ? null : prev))}
                 onPointerDown={(e) => {
                   e.preventDefault();
                   e.stopPropagation();
                   setSelectedHoleIndex(holeIndex);
+                  if (!isEditable || !onChangePolygon) return;
+                  if (activeTool === "delete") return;
+                  if (e.button !== 0) return;
+                  const world = toWorldCoords(e.clientX, e.clientY);
+                  if (!world) return;
+                  holeMoveDragRef.current = {
+                    pointerId: e.pointerId,
+                    holeIndex,
+                    startWorld: world,
+                    startHole: hole.map((p) => ({ ...p })),
+                  };
+                  setIsHoleMoving(true);
+                  svgRef.current?.setPointerCapture?.(e.pointerId);
                 }}
-                style={{ cursor: isEditable ? "pointer" : "default" }}
+                style={{
+                  cursor: !isEditable
+                    ? "default"
+                    : isHoleMoving && isSelected
+                      ? "grabbing"
+                      : isHovered || isSelected
+                        ? "move"
+                        : "default",
+                }}
               />
             );
           })}
