@@ -35,5 +35,12 @@ export function buildCirclePoints(center: { xMm: number; yMm: number }, radiusMm
         const a = (i / segments) * Math.PI * 2;
         pts.push({ xMm: center.xMm + Math.cos(a) * r, yMm: center.yMm + Math.sin(a) * r });
     }
-    return pts;
+}
+
+export function isRectangle(points: { xMm: number; yMm: number }[]) {
+    if (points.length !== 4) return false;
+    const [p0, p1, p2, p3] = points;
+    const d02 = (p2.xMm - p0.xMm) ** 2 + (p2.yMm - p0.yMm) ** 2;
+    const d13 = (p3.xMm - p1.xMm) ** 2 + (p3.yMm - p1.yMm) ** 2;
+    return Math.abs(d02 - d13) < 1;
 }

@@ -1,4 +1,4 @@
-import type { Plan } from "@deck/core";
+import type { Plan } from "../types";
 import { type ShapeType } from "../types";
 import { type CutoutMeta } from "../geometry/cutouts";
 
