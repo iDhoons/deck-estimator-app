@@ -55,8 +55,13 @@ export function calculateQuantities(
 ): Quantities {
   // 1) 면적 (mm^2 → m^2)
   const deckAreaMm2 = polygonAreaMm2(plan.polygon);
-  const stairsAreaMm2 =
-    plan.stairs?.enabled && plan.stairs.footprintPolygon ? polygonAreaMm2(plan.stairs.footprintPolygon) : 0;
+  let stairsAreaMm2 = 0;
+  if (plan.stairs?.enabled && plan.stairs.items) {
+    for (const item of plan.stairs.items) {
+      // 단순 직사각형 면적 합산 (폭 x (단수 x 단깊이))
+      stairsAreaMm2 += item.widthMm * (item.stepCount * item.stepDepthMm);
+    }
+  }
 
   const totalAreaMm2 = deckAreaMm2 + stairsAreaMm2;
 

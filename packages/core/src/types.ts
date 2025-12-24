@@ -10,6 +10,17 @@ export type Polygon = {
 
 export type LineSegment = { x1: number; y1: number; x2: number; y2: number };
 
+export type StairConfig = {
+  id: string;
+  sideIndex: number;
+  startMm: number;
+  widthMm: number;
+  stepCount: number;
+  stepDepthMm: number;
+  stepHeightMm: number;
+  closedRisers?: boolean;
+};
+
 export type Plan = {
   unit: "mm";
   polygon: Polygon;
@@ -39,18 +50,7 @@ export type Plan = {
 
   stairs?: {
     enabled: boolean;
-
-    /** 계단 평면 면적을 “총면적에 포함”시키기 위한 옵션(Consumer v1용) */
-    footprintPolygon?: Polygon;
-
-    /** 옵션 표기용 */
-    widthMm?: number;
-    totalRiseMm?: number;
-    /** 옆면/챌판 마감(막힘형). false면 오픈형으로 간주 */
-    closedRisers?: boolean;
-
-    /** 계단 최하단 랜딩 */
-    landingType?: "pad" | "post";
+    items: StairConfig[];
 
     /** 측판(스트링거) 자재 오버라이드: 미기재 시 메인데크 제품과 동일한 값 사용 */
     stringerMaterialOverrides?: {
@@ -58,9 +58,6 @@ export type Plan = {
       widthMm?: number;
       stockLengthMm?: number;
     };
-
-    /** (legacy) */
-    sideCladding?: boolean;
   };
 };
 
@@ -144,28 +141,30 @@ export type Quantities = {
   /** 계단 자재 내역(하부구조 포함) */
   stairs?: {
     enabled: boolean;
-    stepCount: number;
-    unitRiseMm: number;
-    unitRunMm: number;
-    widthMm: number;
+    
+    items: {
+      id: string;
+      stepCount: number;
+      unitRiseMm: number;
+      unitRunMm: number;
+      widthMm: number;
+    }[];
+
     stringers: {
-      qty: number;
-      lengthMm: number;
+      totalQty: number;
+      totalLengthMm: number;
       stockLengthMm: number;
       pieces: number;
     };
     treads: {
-      boardsPerStep: number;
-      usedLengthMm: number;
+      totalUsedLengthMm: number;
       pieces: number;
     };
     risers?: {
-      boardsPerStep: number;
-      usedLengthMm: number;
+      totalUsedLengthMm: number;
       pieces: number;
     };
     landing?: {
-      type: "pad" | "post";
       padsQty?: number;
       pilesQty?: number;
     };

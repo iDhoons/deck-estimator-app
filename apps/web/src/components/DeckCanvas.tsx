@@ -182,13 +182,10 @@ export function DeckCanvas({
   const [hoverEdgeId, setHoverEdgeId] = useState<string | null>(null);
   const [activeEdgeId, setActiveEdgeId] = useState<string | null>(null);
   const [isEdgeDragging, setIsEdgeDragging] = useState(false);
-  const [cursorPosition, setCursorPosition] = useState<{ x: number; y: number } | null>(null);
-  const [isFreePolygonClosed, setIsFreePolygonClosed] = useState(false);
   const [activeTool, setActiveTool] = useState<"add" | "delete" | "wall" | "cutout" | null>(null);
   const [hoverAddEdgeIndex, setHoverAddEdgeIndex] = useState<number | null>(null);
   const [hoverAddPoint, setHoverAddPoint] = useState<{ x: number; y: number } | null>(null);
   const [svgPxSize, setSvgPxSize] = useState<{ w: number; h: number }>({ w: 0, h: 0 });
-  const [typedLength, setTypedLength] = useState("");
   const [cutoutShape, setCutoutShape] = useState<CutoutShape>("rectangle");
   const [selectedHoleIndex, setSelectedHoleIndex] = useState<number | null>(null);
   const holeVertexDragRef = useRef<{ pointerId: number; holeIndex: number; vertexIndex: number } | null>(null);
@@ -289,14 +286,43 @@ export function DeckCanvas({
   const isEditable = typeof onChangePolygon === "function";
   const isSubView = viewMode === "substructure";
 
+  // --- Free draw redesign: single state machine (replaces cursor/closed/typedLength soup)
+  type DrawingMode = "idle" | "drawing" | "closed";
+  const [drawingMode, setDrawingMode] = useState<DrawingMode>(() => (shapeType === "free" ? "drawing" : "idle"));
+  const previewLineRef = useRef<SVGLineElement | null>(null);
+
   // polygon 기반으로 도형 정보 판단
   const shapeInfo = useMemo(() => {
-    const info = detectShapeInfo(polygon.outer, isFreePolygonClosed, shapeType);
+    const info = detectShapeInfo(polygon.outer, drawingMode === "closed", shapeType);
     return info;
-  }, [polygon.outer, isFreePolygonClosed, shapeType]);
+  }, [polygon.outer, drawingMode, shapeType]);
+
+  const isFreeMode = shapeType === "free" || shapeInfo.isFree;
+  const isFreeDrawing = isFreeMode && drawingMode === "drawing";
+
+  // Keep drawingMode in sync with external shapeType + polygon
+  useEffect(() => {
+    if (shapeType !== "free") {
+      if (drawingMode !== "idle") setDrawingMode("idle");
+      return;
+    }
+    // When entering free mode with an existing polygon, treat it as already closed.
+    // When cleared, start a new drawing.
+    if (polygon.outer.length === 0) {
+      if (drawingMode !== "drawing") setDrawingMode("drawing");
+      return;
+    }
+    if (polygon.outer.length >= 3) {
+      if (drawingMode === "idle") setDrawingMode("closed");
+    } else {
+      if (drawingMode === "closed") setDrawingMode("drawing");
+    }
+  }, [drawingMode, polygon.outer.length, shapeType]);
 
   // 프리셋 도형과 자유형 모두에서 변 드래그 가능
-  const enableEdgeControls = isEditable && (shapeInfo.hasEdgeControls || shapeInfo.isFree);
+  // 자유형 '그리는 중(drawing)'에는 edge overlay가 (i+1)%n 때문에 마지막→첫 점 변을 만들어
+  // 닫힘 선처럼 보이거나 포인터 이벤트를 가로챌 수 있으므로 비활성화한다.
+  const enableEdgeControls = isEditable && !isFreeDrawing && (shapeInfo.hasEdgeControls || shapeInfo.isFree);
 
   const toSvgCoords = useCallback((clientX: number, clientY: number) => {
     const svg = svgRef.current;
@@ -486,6 +512,9 @@ export function DeckCanvas({
 
 
   const addHandles = useMemo(() => {
+    // 자유형 그리기 중에는 '변 위 점 추가' 오버레이가 마지막→첫 점 변까지 포함(모듈로)되어
+    // 닫힘처럼 느껴지거나 클릭을 가로챌 수 있어 비활성화한다.
+    if (isFreeDrawing) return [];
     if (!isEditable || activeTool !== "add") return [];
     if (hoverAddEdgeIndex === null || !hoverAddPoint) return [];
     const pts = polygon.outer;
@@ -497,7 +526,7 @@ export function DeckCanvas({
     // 그렇지 않으면 nextIndex 위치에 삽입
     const insertIndex = nextIndex === 0 ? pts.length : nextIndex;
     return [{ id: `add-handle-${i}`, insertIndex, position: hoverAddPoint }];
-  }, [activeTool, hoverAddEdgeIndex, hoverAddPoint, isEditable, polygon.outer]);
+  }, [activeTool, hoverAddEdgeIndex, hoverAddPoint, isEditable, isFreeDrawing, polygon.outer]);
 
   const geometry = useMemo(() => {
     const pts = polygon.outer;
@@ -507,8 +536,12 @@ export function DeckCanvas({
     if (pts.length < 2) {
       return { vertexLabels, edgeLabels, areaM2 };
     }
+    
+    // 자유형 그리기 중(drawing)이면 마지막 변(마지막 점→첫 점)을 제외
+    const isOpenPolyline = isFreeDrawing;
 
-    const signedArea = polygonSignedArea(pts);
+    // 열린 폴리라인 상태에서 면적/방향을 닫힌 폴리곤처럼 계산하면 혼란을 주므로 0으로 취급
+    const signedArea = isOpenPolyline ? 0 : polygonSignedArea(pts);
     // 면적 계산: mm²를 m²로 변환 (1m² = 1,000,000mm²)
     const areaMm2 = Math.abs(signedArea);
     areaM2 = areaMm2 / 1000000;
@@ -565,7 +598,9 @@ export function DeckCanvas({
     }
 
     const usedEdgePositions: { x: number; y: number }[] = [];
-    for (let i = 0; i < pts.length; i++) {
+    // 열린 폴리라인이면 마지막 변(마지막 점→첫 점) 제외
+    const edgeCount = isOpenPolyline ? pts.length - 1 : pts.length;
+    for (let i = 0; i < edgeCount; i++) {
       const nextIndex = (i + 1) % pts.length;
       const start = pts[i];
       const end = pts[nextIndex];
@@ -620,7 +655,7 @@ export function DeckCanvas({
     }
 
     return { vertexLabels, edgeLabels, areaM2 };
-  }, [polygon.outer]);
+  }, [polygon.outer, isFreeDrawing]);
 
   const { edgeLabels, areaM2 } = geometry;
 
@@ -718,10 +753,11 @@ export function DeckCanvas({
         return;
       }
 
-      // Update cursor position for free mode preview (only when drawing from scratch, not when converted from preset)
-      if (shapeInfo.isFree && !shapeInfo.isClosed && !isFreePolygonClosed && polygon.outer.length > 0) {
+      // Free draw preview line: update imperatively (no React cursor state).
+      if (isFreeDrawing && polygon.outer.length > 0) {
+        const line = previewLineRef.current;
         const world = toWorldCoords(event.clientX, event.clientY);
-        if (world) {
+        if (line && world) {
           let x = snapToGrid(world.x, GRID_SIZE);
           let y = snapToGrid(world.y, GRID_SIZE);
 
@@ -730,18 +766,13 @@ export function DeckCanvas({
             const lastPoint = polygon.outer[polygon.outer.length - 1];
             const dx = Math.abs(x - lastPoint.xMm);
             const dy = Math.abs(y - lastPoint.yMm);
-            if (dx > dy) {
-              y = lastPoint.yMm; // 수평 고정
-            } else {
-              x = lastPoint.xMm; // 수직 고정
-            }
+            if (dx > dy) y = lastPoint.yMm;
+            else x = lastPoint.xMm;
           }
 
-          setCursorPosition({ x, y });
+          line.setAttribute("x2", String(x));
+          line.setAttribute("y2", String(y));
         }
-      } else {
-        // 도형이 완성되거나 프리셋에서 전환된 경우 커서 위치 초기화
-        setCursorPosition(null);
       }
       if (edgeDragRef.current && onChangePolygon) {
         const drag = edgeDragRef.current;
@@ -849,7 +880,6 @@ export function DeckCanvas({
       buildCirclePolygon,
       shapeInfo.isFree,
       shapeInfo.isClosed,
-      isFreePolygonClosed,
       polygon,
       toWorldCoords,
       dragIndex,
@@ -857,6 +887,7 @@ export function DeckCanvas({
       viewBox.h,
       viewBox.w,
       activeTool,
+      isFreeDrawing,
     ]
   );
 
@@ -971,18 +1002,19 @@ export function DeckCanvas({
         event.stopPropagation();
         if (!onChangePolygon) return;
         const nextOuter = polygon.outer.filter((_, i) => i !== idx);
-        setIsFreePolygonClosed(nextOuter.length >= 3 && isFreePolygonClosed);
         onChangePolygon({ ...polygon, outer: nextOuter });
         return;
       }
 
       if (!allowVertexDrag) return;
 
-      // In free mode, if clicking on first vertex with 3+ points and polygon is not closed yet, close it
-      if (shapeInfo.isFree && idx === 0 && polygon.outer.length >= 3 && !isFreePolygonClosed) {
-        event.preventDefault();
-        event.stopPropagation();
-        setIsFreePolygonClosed(true);
+      // Free draw: while drawing, only allow closing via first vertex click.
+      if (isFreeDrawing) {
+        if (idx === 0 && polygon.outer.length >= 3) {
+          event.preventDefault();
+          event.stopPropagation();
+          setDrawingMode("closed");
+        }
         return;
       }
 
@@ -993,7 +1025,7 @@ export function DeckCanvas({
       setDragIndex(idx);
       // 원형 드래그는 더 이상 특별 처리하지 않음
     },
-    [activeTool, isEditable, isFreePolygonClosed, onChangePolygon, polygon, shapeInfo]
+    [activeTool, isEditable, isFreeDrawing, onChangePolygon, polygon, setDrawingMode, shapeInfo.isFree]
   );
 
   const startEdgeDrag = useCallback(
@@ -1065,18 +1097,6 @@ export function DeckCanvas({
           ...polygon.outer.slice(insertIndex),
         ];
 
-        // 프리셋 도형에서 꼭지점을 추가하면 자유형으로 전환되므로, isFreePolygonClosed를 true로 설정
-        // (점선이 나타나지 않도록 하기 위함)
-        if (!shapeInfo.isFree) {
-          setIsFreePolygonClosed(true);
-        }
-        
-        // 프리셋 도형에서 꼭지점을 추가하면 자유형으로 전환되므로, isFreePolygonClosed를 true로 설정
-        // (점선이 나타나지 않도록 하기 위함)
-        if (!shapeInfo.isFree) {
-          setIsFreePolygonClosed(true);
-        }
-        
         onChangePolygon({ ...polygon, outer: newOuter });
         pointerIdRef.current = event.pointerId;
         svgRef.current?.setPointerCapture?.(event.pointerId);
@@ -1087,9 +1107,8 @@ export function DeckCanvas({
 
   const handleCanvasClick = useCallback(
     (event: ReactPointerEvent<SVGSVGElement>) => {
-      // Only handle clicks in free mode
-      if (!shapeInfo.isFree) return;
-      if (isFreePolygonClosed) return;
+      // Only handle clicks in free drawing mode
+      if (!isFreeDrawing) return;
       if (!isEditable || !onChangePolygon) return;
 
       // Ignore if clicking on edge controls
@@ -1123,35 +1142,29 @@ export function DeckCanvas({
         yMm: snappedY,
       };
 
-        // Check if we're closing the polygon (clicking on or near first point)
-        // #region agent log
-        fetch('http://127.0.0.1:7242/ingest/879cd1c0-0440-4b15-a553-b8dff9f73345',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'DeckCanvas.tsx:885',message:'Checking close condition',data:{points:polygon.outer.length},timestamp:Date.now(),sessionId:'debug-session',runId:'run2',hypothesisId:'H4'})}).catch(()=>{});
-        // #endregion
-        if (polygon.outer.length >= 3) {
-          const firstPoint = polygon.outer[0];
-          const dx = snappedPoint.xMm - firstPoint.xMm;
-          const dy = snappedPoint.yMm - firstPoint.yMm;
-          const distance = Math.sqrt(dx * dx + dy * dy);
+      // 첫 번째 점 근처 클릭 시 도형 자동 닫힘 (점 3개 이상일 때)
+      if (polygon.outer.length >= 3) {
+        const first = polygon.outer[0];
+        const dx = snappedPoint.xMm - first.xMm;
+        const dy = snappedPoint.yMm - first.yMm;
+        const distance = Math.sqrt(dx * dx + dy * dy);
+        const CLOSE_RADIUS = 50; // 50mm 이내 클릭 시 닫힘
 
-          const CLOSE_THRESHOLD = 20; // 20mm threshold for closing
-          
-          // #region agent log
-          fetch('http://127.0.0.1:7242/ingest/879cd1c0-0440-4b15-a553-b8dff9f73345',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'DeckCanvas.tsx:894',message:'Close distance check',data:{distance,threshold:CLOSE_THRESHOLD},timestamp:Date.now(),sessionId:'debug-session',runId:'run2',hypothesisId:'H4'})}).catch(()=>{});
-          // #endregion
-
-          // Close if clicking exactly on first point or within threshold
-          if (distance <= CLOSE_THRESHOLD) {
-            // Close the polygon - don't add new point, just mark as closed
-            setIsFreePolygonClosed(true);
-            return;
-          }
+        if (distance <= CLOSE_RADIUS) {
+          // 도형 닫기 (첫 점을 추가하지 않고 닫힘 상태로 전환)
+          setDrawingMode("closed");
+          setActiveTool(null);
+          setHoverAddEdgeIndex(null);
+          setHoverAddPoint(null);
+          return;
         }
+      }
 
       // Add new vertex to polygon
       const newOuter = [...polygon.outer, snappedPoint];
       onChangePolygon({ ...polygon, outer: newOuter });
     },
-    [shapeInfo.isFree, isFreePolygonClosed, isEditable, onChangePolygon, isPanning, dragIndex, toWorldCoords, polygon]
+    [dragIndex, isEditable, isFreeDrawing, isPanning, onChangePolygon, polygon, toWorldCoords, setDrawingMode]
   );
 
   const startPan = useCallback(
@@ -1209,47 +1222,11 @@ export function DeckCanvas({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [polygon.outer, dragIndex, isEdgeDragging, shapeInfo.isFree, shapeInfo.isClosed, isCircle]); // 의존성 추가
 
-  // Keyboard shortcuts: ESC to exit edit mode, Ctrl+Z/Ctrl+Shift+Z for undo/redo, Numeric input
+  // Keyboard shortcuts: ESC to exit edit mode, Ctrl+Z/Ctrl+Shift+Z for undo/redo
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
-      // 숫자 입력 처리 (자유형 그리기 중일 때)
-      if (activeTool === "add" && shapeInfo.isFree && !isFreePolygonClosed && polygon.outer.length > 0) {
-        if (/^[0-9.]$/.test(event.key)) {
-          if (event.key === "." && typedLength.includes(".")) return;
-          setTypedLength((prev) => prev + event.key);
-          return;
-        }
-        if (event.key === "Backspace") {
-          setTypedLength((prev) => prev.slice(0, -1));
-          return;
-        }
-        if (event.key === "Enter" && typedLength) {
-          const len = parseFloat(typedLength);
-          if (len > 0 && cursorPosition) {
-            const lastPoint = polygon.outer[polygon.outer.length - 1];
-            const dx = cursorPosition.x - lastPoint.xMm;
-            const dy = cursorPosition.y - lastPoint.yMm;
-            const currentDist = Math.hypot(dx, dy);
-            
-            if (currentDist > EPS) {
-              const nx = lastPoint.xMm + (dx / currentDist) * len;
-              const ny = lastPoint.yMm + (dy / currentDist) * len;
-              
-              const newOuter = [...polygon.outer, { xMm: nx, yMm: ny }];
-              onChangePolygon?.({ ...polygon, outer: newOuter });
-              setTypedLength("");
-            }
-          }
-          return;
-        }
-      }
-
       // ESC to exit edit mode
       if (event.key === "Escape") {
-        if (typedLength) {
-          setTypedLength("");
-          return;
-        }
         if (activeTool !== null) {
           setActiveTool(null);
           setHoverAddEdgeIndex(null);
@@ -1273,21 +1250,14 @@ export function DeckCanvas({
     return () => {
       window.removeEventListener("keydown", handleKeyDown);
     };
-  }, [activeTool, handleUndo, handleRedo, typedLength, shapeInfo.isFree, isFreePolygonClosed, polygon.outer, cursorPosition, onChangePolygon]);
+  }, [activeTool, handleUndo, handleRedo]);
 
   // When switching to free mode, default to add tool so first click drops a point
   useEffect(() => {
-    if (shapeInfo.isFree && !shapeInfo.isClosed) {
+    if (shapeType === "free" && drawingMode === "drawing") {
       setActiveTool("add");
     }
-  }, [shapeInfo.isFree, shapeInfo.isClosed]);
-
-  // When polygon is cleared (e.g. switching to free mode), reset closed state
-  useEffect(() => {
-    if (polygon.outer.length === 0) {
-      setIsFreePolygonClosed(false);
-    }
-  }, [polygon.outer.length]);
+  }, [drawingMode, shapeType]);
 
   const handleSvgPointerDown = useCallback(
     (event: ReactPointerEvent<SVGSVGElement>) => {
@@ -1330,7 +1300,7 @@ export function DeckCanvas({
       }
 
       // In delete mode, clicking the canvas should not add points; let drag handlers handle deletions.
-      if (activeTool === "add" && shapeInfo.isFree && !isFreePolygonClosed && event.button === 0) {
+      if (activeTool === "add" && isFreeDrawing && event.button === 0) {
         handleCanvasClick(event);
       }
       // Always try to start pan (will be filtered in startPan)
@@ -1343,9 +1313,8 @@ export function DeckCanvas({
       draftFreeCutoutPoints,
       handleCanvasClick,
       isEditable,
-      isFreePolygonClosed,
       onChangePolygon,
-      shapeInfo.isFree,
+      isFreeDrawing,
       startPan,
       toWorldCoords,
     ]
@@ -1384,11 +1353,11 @@ export function DeckCanvas({
                         ? "not-allowed"
                         : activeTool === "add"
                           ? "copy"
-                          : shapeInfo.isFree
-                            ? isFreePolygonClosed
-                              ? "grab"
-                              : "crosshair"
-                            : "grab",
+                        : shapeInfo.isFree
+                          ? drawingMode === "closed"
+                            ? "grab"
+                            : "crosshair"
+                          : "grab",
           overflow: "visible",
         }}
         onPointerDown={handleSvgPointerDown}
@@ -1416,7 +1385,7 @@ export function DeckCanvas({
         </defs>
 
         {/* Grid background for free mode (when not closed OR in edit mode) */}
-        {shapeInfo.isFree && (!isFreePolygonClosed || activeTool !== null) && (
+        {shapeInfo.isFree && (drawingMode !== "closed" || activeTool !== null) && (
           <rect
             x={viewBox.x - GRID_DISPLAY_SIZE}
             y={viewBox.y - GRID_DISPLAY_SIZE}
@@ -1745,6 +1714,7 @@ export function DeckCanvas({
             })}
 
           {activeTool === "add" &&
+            !isFreeDrawing &&
             polygon.outer.map((point, idx) => {
               const nextIndex = (idx + 1) % polygon.outer.length;
               return (
@@ -1767,7 +1737,8 @@ export function DeckCanvas({
               );
             })}
 
-          {addHandles.map((handle) => (
+          {!isFreeDrawing &&
+            addHandles.map((handle) => (
             <circle
               key={handle.id}
               cx={handle.position.x}
@@ -1787,7 +1758,7 @@ export function DeckCanvas({
               // Enable vertex dragging for:
               // 1. Free shapes (always editable)
               // 2. Preset shapes (직사각형, ㄱ자형, T형, 원형) - only in "add" mode
-              const canDrag = isEditable && (shapeInfo.isFree || activeTool === "add");
+              const canDrag = isEditable && (shapeInfo.isFree || activeTool === "add") && !isFreeDrawing;
               const isDeleteMode = activeTool === "delete";
 
               return (
@@ -1810,74 +1781,20 @@ export function DeckCanvas({
 
           {/* Circle radius handle removed: resize by dragging the outline */}
 
-          {/* Free mode: preview line from last point to cursor (only when drawing from scratch, not when converted from preset) */}
-          {shapeInfo.isFree && !shapeInfo.isClosed && !isFreePolygonClosed && polygon.outer.length > 0 && cursorPosition && (
-            <>
-              <line
-                x1={polygon.outer[polygon.outer.length - 1].xMm}
-                y1={polygon.outer[polygon.outer.length - 1].yMm}
-                x2={cursorPosition.x}
-                y2={cursorPosition.y}
-                stroke="#2463ff"
-                strokeWidth={2}
-                strokeDasharray="6,4"
-                pointerEvents="none"
-                opacity={0.6}
-              />
-              {/* Live Dimension / Typed Input Display */}
-              {(() => {
-                const lastPoint = polygon.outer[polygon.outer.length - 1];
-                const dist = Math.hypot(cursorPosition.x - lastPoint.xMm, cursorPosition.y - lastPoint.yMm);
-                const midX = (lastPoint.xMm + cursorPosition.x) / 2;
-                const midY = (lastPoint.yMm + cursorPosition.y) / 2;
-                const offset = 15 / (pixelsPerUnit * scale);
-
-                const displayText = typedLength ? `${typedLength}mm` : `${Math.round(dist).toLocaleString()}mm`;
-                const fillColor = typedLength ? "#000" : "#2463ff";
-
-                return (
-                  <text
-                    x={midX}
-                    y={midY - offset}
-                    fill={fillColor}
-                    fontSize={suggestedEdgeFontUser / scale}
-                    fontWeight={600}
-                    textAnchor="middle"
-                    pointerEvents="none"
-                    stroke="#ffffff"
-                    strokeWidth={3 / scale}
-                    paintOrder="stroke"
-                    transform={`rotate(${-rotation}, ${midX}, ${midY})`}
-                  >
-                    {displayText}
-                  </text>
-                );
-              })()}
-              {/* Show close indicator when near first point */}
-              {polygon.outer.length >= 3 && (() => {
-                const firstPoint = polygon.outer[0];
-                const dx = cursorPosition.x - firstPoint.xMm;
-                const dy = cursorPosition.y - firstPoint.yMm;
-                const distance = Math.sqrt(dx * dx + dy * dy);
-                const CLOSE_THRESHOLD = 20;
-                if (distance <= CLOSE_THRESHOLD) {
-                  return (
-                    <circle
-                      cx={firstPoint.xMm}
-                      cy={firstPoint.yMm}
-                      r={CLOSE_THRESHOLD}
-                      fill="none"
-                      stroke="#2463ff"
-                      strokeWidth={2}
-                      strokeDasharray="8,4"
-                      pointerEvents="none"
-                      opacity={0.4}
-                    />
-                  );
-                }
-                return null;
-              })()}
-            </>
+          {/* Free draw preview line (no close indicator, no numeric input). */}
+          {isFreeDrawing && polygon.outer.length > 0 && (
+            <line
+              ref={previewLineRef}
+              x1={polygon.outer[polygon.outer.length - 1].xMm}
+              y1={polygon.outer[polygon.outer.length - 1].yMm}
+              x2={polygon.outer[polygon.outer.length - 1].xMm}
+              y2={polygon.outer[polygon.outer.length - 1].yMm}
+              stroke="#2463ff"
+              strokeWidth={2}
+              strokeDasharray="6,4"
+              pointerEvents="none"
+              opacity={0.6}
+            />
           )}
 
         </g>
@@ -1912,10 +1829,10 @@ export function DeckCanvas({
 
         {shapeInfo.isFree && isEditable && (
           <text x={viewBox.x + 20} y={viewBox.y + 30} fill="#2463ff" fontSize={16} pointerEvents="none">
-            {isFreePolygonClosed
-              ? `면 완성됨 | 점 개수: ${polygon.outer.length} | 점을 추가하려면 초기화하세요`
+            {drawingMode === "closed"
+              ? `면 완성됨 | 점 개수: ${polygon.outer.length} | 편집: 점 드래그/삭제`
               : polygon.outer.length >= 3
-                ? `클릭하여 점 추가 | 첫 점 근처 클릭으로 면 완성 | 점 개수: ${polygon.outer.length}`
+                ? `클릭하여 점 추가 | 첫 점 근처 클릭으로 완성 | 점 개수: ${polygon.outer.length}`
                 : `클릭하여 점 추가 | 점 개수: ${polygon.outer.length}`}
           </text>
         )}
@@ -1960,6 +1877,7 @@ export function DeckCanvas({
           </button>
         </div>
       )}
+
 
       <div
         style={{

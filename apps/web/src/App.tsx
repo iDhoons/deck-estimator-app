@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   calculateQuantities,
   buildCutPlan,
@@ -10,9 +10,9 @@ import {
 } from "@deck/core";
 import { t } from "./i18n";
 import { DeckCanvas, type ViewMode } from "./components/DeckCanvas";
-import { ControlsPanel } from "./components/ControlsPanel";
+import { ControlsPanel, type CutoutShape } from "./components/ControlsPanel";
 import { ResultsPanel } from "./components/ResultsPanel";
-import { fitPointsToViewport, polygonCentroid } from "./geometry/polygon";
+import { isPointInsidePolygon, polygonCentroid } from "./geometry/polygon";
 import { EDGE_LENGTH_STEP_MM, getEdgeList, MIN_EDGE_SPAN_MM, updateEdgeLength } from "./geometry/edges";
 
 type Mode = "consumer" | "pro";
@@ -20,6 +20,44 @@ export type ShapeType = "rectangle" | "lShape" | "tShape" | "circle" | "free";
 
 const VIEWBOX_SIZE = { width: 2000, height: 1200 };
 const VIEWBOX_CENTER = { x: VIEWBOX_SIZE.width / 2, y: VIEWBOX_SIZE.height / 2 };
+
+type CutoutMeta = {
+  shape: CutoutShape;
+  xMm: number;
+  yMm: number;
+  widthMm: number;
+  heightMm: number;
+};
+
+function holeShapeFromPoints(pts: { xMm: number; yMm: number }[]): CutoutShape {
+  if (pts.length === 4) return "rectangle";
+  if (pts.length >= 16) return "circle";
+  return "free";
+}
+
+function bboxFromPoints(pts: { xMm: number; yMm: number }[]) {
+  let minX = Infinity;
+  let maxX = -Infinity;
+  let minY = Infinity;
+  let maxY = -Infinity;
+  for (const p of pts) {
+    minX = Math.min(minX, p.xMm);
+    maxX = Math.max(maxX, p.xMm);
+    minY = Math.min(minY, p.yMm);
+    maxY = Math.max(maxY, p.yMm);
+  }
+  const cx = (minX + maxX) / 2;
+  const cy = (minY + maxY) / 2;
+  const w = Math.max(0, maxX - minX);
+  const h = Math.max(0, maxY - minY);
+  return { minX, maxX, minY, maxY, cx, cy, w, h };
+}
+
+function metaFromHolePoints(pts: { xMm: number; yMm: number }[], shape?: CutoutShape): CutoutMeta {
+  const b = bboxFromPoints(pts);
+  const detected = shape ?? holeShapeFromPoints(pts);
+  return { shape: detected, xMm: b.cx, yMm: b.cy, widthMm: Math.round(b.w), heightMm: Math.round(b.h) };
+}
 
 const product: Product = {
   id: "DN34",
@@ -47,18 +85,7 @@ const basePlan: Plan = {
   substructureOverrides: {},
   stairs: {
     enabled: true,
-    footprintPolygon: {
-      outer: [
-        { xMm: 0, yMm: 1000 },
-        { xMm: 1000, yMm: 1000 },
-        { xMm: 1000, yMm: 1300 },
-        { xMm: 0, yMm: 1300 },
-      ],
-    },
-    widthMm: 900,
-    totalRiseMm: 900,
-    closedRisers: false,
-    landingType: "pad",
+    items: [],
     stringerMaterialOverrides: {},
   },
 };
@@ -86,8 +113,8 @@ const SHAPE_PRESETS: Record<Exclude<ShapeType, "free">, ShapePreset> = {
     getPoints: () => [
       { xMm: 0, yMm: 0 },
       { xMm: 1000, yMm: 0 },
-      { xMm: 1000, yMm: 200 },
-      { xMm: 0, yMm: 200 },
+      { xMm: 1000, yMm: 1000 },
+      { xMm: 0, yMm: 1000 },
     ],
   },
   lShape: {
@@ -117,7 +144,7 @@ const SHAPE_PRESETS: Record<Exclude<ShapeType, "free">, ShapePreset> = {
   circle: {
     label: "원형",
     getPoints: () => {
-      const radius = 1000;
+      const radius = 500;
       const segments = 16;
       const pts = [];
       for (let i = 0; i < segments; i++) {
@@ -132,8 +159,25 @@ const SHAPE_PRESETS: Record<Exclude<ShapeType, "free">, ShapePreset> = {
   },
 };
 
-const fitShapeToCanvas = (points: { xMm: number; yMm: number }[]) =>
-  fitPointsToViewport(points, VIEWBOX_SIZE, VIEWBOX_CENTER, 0.5);
+// 프리셋 도형의 실제 mm(치수)를 유지해야 하므로, 스케일 없이 '중앙으로 평행이동'만 수행
+const centerShapeToCanvasNoScale = (points: { xMm: number; yMm: number }[]) => {
+  if (points.length === 0) return points;
+  let minX = Infinity;
+  let maxX = -Infinity;
+  let minY = Infinity;
+  let maxY = -Infinity;
+  for (const p of points) {
+    minX = Math.min(minX, p.xMm);
+    maxX = Math.max(maxX, p.xMm);
+    minY = Math.min(minY, p.yMm);
+    maxY = Math.max(maxY, p.yMm);
+  }
+  const cx = (minX + maxX) / 2;
+  const cy = (minY + maxY) / 2;
+  const dx = VIEWBOX_CENTER.x - cx;
+  const dy = VIEWBOX_CENTER.y - cy;
+  return points.map((p) => ({ xMm: p.xMm + dx, yMm: p.yMm + dy }));
+};
 
 function circleSegmentsForSagitta(radiusMm: number, targetSagittaMm: number) {
   const r = Math.max(radiusMm, 0);
@@ -159,7 +203,7 @@ const initialPlan: Plan = {
   ...basePlan,
   polygon: {
     ...basePlan.polygon,
-    outer: fitShapeToCanvas(SHAPE_PRESETS.rectangle.getPoints()),
+    outer: centerShapeToCanvasNoScale(SHAPE_PRESETS.rectangle.getPoints()),
   },
 };
 
@@ -171,13 +215,57 @@ export default function App() {
   const [viewMode, setViewMode] = useState<ViewMode>("deck");
   const [showResults, setShowResults] = useState(false);
   const [shapeType, setShapeType] = useState<ShapeType>("rectangle");
+  const [cutoutsMeta, setCutoutsMeta] = useState<CutoutMeta[]>(() => {
+    const holes = initialPlan.polygon.holes ?? [];
+    return holes.map((h) => metaFromHolePoints(h));
+  });
+
+  // holes(점 편집/추가/삭제) 변화에 맞춰 메타데이터를 동기화
+  useEffect(() => {
+    const holes = plan.polygon.holes ?? [];
+    setCutoutsMeta((prev) => {
+      if (holes.length === 0) return [];
+      const next: CutoutMeta[] = [];
+      for (let i = 0; i < holes.length; i++) {
+        const hole = holes[i];
+        const prevMeta = prev[i];
+        const shape = prevMeta?.shape ?? holeShapeFromPoints(hole);
+        const derived = metaFromHolePoints(hole, shape);
+        next.push(prevMeta ? { ...prevMeta, ...derived, shape } : derived);
+      }
+      return next;
+    });
+  }, [plan.polygon.holes]);
 
   // --- Handlers
   const handlePolygonChange = useCallback((updatedPolygon: Polygon) => {
+    let keptIndices: number[] | null = null;
     setPlan((prev) => {
       const nextAttached = (prev.attachedEdgeIndices ?? []).filter((i: number) => i >= 0 && i < updatedPolygon.outer.length);
-      return { ...prev, polygon: updatedPolygon, attachedEdgeIndices: nextAttached };
+      // 외곽 변경 시 외곽 밖으로 나가는 개구부 자동 제거
+      const prevHoles = prev.polygon.holes ?? [];
+      const nextHoles: { xMm: number; yMm: number }[][] = [];
+      const kept: number[] = [];
+      for (let i = 0; i < prevHoles.length; i++) {
+        const hole = prevHoles[i];
+        const ok =
+          hole.length >= 3 &&
+          hole.every((p) => isPointInsidePolygon({ x: p.xMm, y: p.yMm }, updatedPolygon.outer as any));
+        if (ok) {
+          nextHoles.push(hole);
+          kept.push(i);
+        }
+      }
+      keptIndices = kept;
+      return {
+        ...prev,
+        polygon: { ...updatedPolygon, holes: nextHoles.length > 0 ? nextHoles : undefined },
+        attachedEdgeIndices: nextAttached,
+      };
     });
+    if (keptIndices) {
+      setCutoutsMeta((prev) => keptIndices!.map((i) => prev[i]).filter(Boolean));
+    }
     
     // polygon이 변경될 때 shapeType 자동 감지 (현재 자유형 모드가 아닐 때만)
     if (shapeType !== "free") {
@@ -204,6 +292,121 @@ export default function App() {
     }
   }, [shapeType]);
 
+  const handleDeleteCutout = useCallback((index: number) => {
+    setPlan((prev) => {
+      const holes = prev.polygon.holes ?? [];
+      if (index < 0 || index >= holes.length) return prev;
+      const nextHoles = holes.filter((_, i) => i !== index);
+      return {
+        ...prev,
+        polygon: { ...prev.polygon, holes: nextHoles.length > 0 ? nextHoles : undefined },
+      };
+    });
+    setCutoutsMeta((prev) => prev.filter((_, i) => i !== index));
+  }, []);
+
+  const handleAddCutout = useCallback(() => {
+    const shape: CutoutShape = "rectangle";
+    let addedMeta: CutoutMeta | null = null;
+    setPlan((prev) => {
+      const outer = prev.polygon.outer;
+      if (outer.length < 3) return prev;
+
+      const inside = (xMm: number, yMm: number) => isPointInsidePolygon({ x: xMm, y: yMm }, outer as any);
+
+      // seed point: centroid if inside, else bbox-ish fallback by sampling vertices midpoints
+      const c = polygonCentroid(outer as any);
+      let cx = c.xMm;
+      let cy = c.yMm;
+      if (!inside(cx, cy)) {
+        const p0 = outer[0];
+        cx = p0.xMm;
+        cy = p0.yMm;
+        for (let i = 1; i < outer.length; i++) {
+          const pi = outer[i];
+          const mx = (p0.xMm + pi.xMm) / 2;
+          const my = (p0.yMm + pi.yMm) / 2;
+          if (inside(mx, my)) {
+            cx = mx;
+            cy = my;
+            break;
+          }
+        }
+      }
+
+      const makeRect = (w: number, h: number) => [
+        { xMm: cx - w / 2, yMm: cy - h / 2 },
+        { xMm: cx + w / 2, yMm: cy - h / 2 },
+        { xMm: cx + w / 2, yMm: cy + h / 2 },
+        { xMm: cx - w / 2, yMm: cy + h / 2 },
+      ];
+
+      let candidate: { xMm: number; yMm: number }[] = [];
+      const w0 = 420;
+      const h0 = 300;
+      for (let k = 0; k < 8; k++) {
+        const w = w0 * Math.pow(0.8, k);
+        const h = h0 * Math.pow(0.8, k);
+        const pts = makeRect(w, h);
+        if (pts.every((p) => inside(p.xMm, p.yMm))) {
+          candidate = pts;
+          break;
+        }
+      }
+
+      if (candidate.length < 3) return prev;
+      const holes = [...(prev.polygon.holes ?? []), candidate];
+      addedMeta = metaFromHolePoints(candidate, shape);
+      return { ...prev, polygon: { ...prev.polygon, holes } };
+    });
+    if (addedMeta) {
+      setCutoutsMeta((prev) => [...prev, addedMeta!]);
+    }
+  }, []);
+
+  const handleChangeCutout = useCallback((index: number, nextMeta: CutoutMeta) => {
+    setCutoutsMeta((prev) => prev.map((m, i) => (i === index ? nextMeta : m)));
+    setPlan((prev) => {
+      const holes = prev.polygon.holes ?? [];
+      if (index < 0 || index >= holes.length) return prev;
+      const prevHole = holes[index];
+
+      const safeW = Math.max(1, Math.round(nextMeta.widthMm));
+      const safeH = Math.max(1, Math.round(nextMeta.heightMm));
+      const safeMeta: CutoutMeta = { ...nextMeta, widthMm: safeW, heightMm: safeH };
+
+      let nextHole: { xMm: number; yMm: number }[] = prevHole;
+      if (safeMeta.shape === "rectangle") {
+        const w = Math.max(MIN_EDGE_SPAN_MM, safeMeta.widthMm);
+        const h = Math.max(MIN_EDGE_SPAN_MM, safeMeta.heightMm);
+        const cx = safeMeta.xMm;
+        const cy = safeMeta.yMm;
+        nextHole = [
+          { xMm: cx - w / 2, yMm: cy - h / 2 },
+          { xMm: cx + w / 2, yMm: cy - h / 2 },
+          { xMm: cx + w / 2, yMm: cy + h / 2 },
+          { xMm: cx - w / 2, yMm: cy + h / 2 },
+        ];
+      } else if (safeMeta.shape === "circle") {
+        const d = Math.max(MIN_EDGE_SPAN_MM, Math.min(safeMeta.widthMm, safeMeta.heightMm));
+        const r = d / 2;
+        const seg = circleSegmentsForSagitta(r, 10);
+        nextHole = buildCirclePoints({ xMm: safeMeta.xMm, yMm: safeMeta.yMm }, r, seg);
+      } else {
+        const b = bboxFromPoints(prevHole);
+        const sx = b.w > 0 ? safeMeta.widthMm / b.w : 1;
+        const sy = b.h > 0 ? safeMeta.heightMm / b.h : 1;
+        nextHole = prevHole.map((p) => ({
+          xMm: safeMeta.xMm + (p.xMm - b.cx) * sx,
+          yMm: safeMeta.yMm + (p.yMm - b.cy) * sy,
+        }));
+      }
+
+      const nextHoles = holes.map((h, i) => (i === index ? nextHole : h));
+      return { ...prev, polygon: { ...prev.polygon, holes: nextHoles.length > 0 ? nextHoles : undefined } };
+    });
+  }, []);
+
   const applyPresetShape = useCallback(
     (nextShape: ShapeType) => {
       // Free drawing mode: 캔버스 초기화하여 새로 그리기 시작
@@ -223,7 +426,7 @@ export default function App() {
 
       setShapeType(nextShape);
       const preset = SHAPE_PRESETS[nextShape];
-      const centered = fitShapeToCanvas(preset.getPoints());
+      const centered = centerShapeToCanvasNoScale(preset.getPoints());
       setPlan((prev) => ({
         ...prev,
         attachedEdgeIndices: [],
@@ -485,6 +688,11 @@ export default function App() {
           }
           stairs={plan.stairs}
           onChangeStairs={(next) => setPlan((prev) => ({ ...prev, stairs: next }))}
+          cutouts={plan.polygon.holes ?? []}
+          onAddCutout={handleAddCutout}
+          onDeleteCutout={handleDeleteCutout}
+          cutoutsMeta={cutoutsMeta}
+          onChangeCutout={handleChangeCutout}
         />
 
         <section className="canvas-pane">
