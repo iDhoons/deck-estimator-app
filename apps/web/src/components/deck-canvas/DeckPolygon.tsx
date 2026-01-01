@@ -64,6 +64,9 @@ export const DeckPolygon = React.memo(function DeckPolygon({
         const baseStrokeWidth = styles.strokeWidth;
         const radius = circleRadius; // Type-narrowed value
 
+        // For circles, always use a visible fill (even in subView mode)
+        const circleFill = styles.fill === "none" ? "rgba(80,160,255,0.12)" : styles.fill;
+
         return (
             <>
                 {/* hit circle (transparent, thick stroke) */}
@@ -87,10 +90,8 @@ export const DeckPolygon = React.memo(function DeckPolygon({
                     r={radius}
                     stroke={styles.stroke}
                     strokeWidth={styles.strokeWidth}
-                    strokeLinejoin={styles.strokeLinejoin}
-                    strokeLinecap={styles.strokeLinecap}
-                    fill={styles.fill}
-                    opacity={styles.opacity}
+                    fill={circleFill}
+                    opacity={1}
                     pointerEvents="none"
                 />
                 <line

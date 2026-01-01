@@ -4,6 +4,7 @@ import type { EdgeHandle } from "../../geometry/edges";
 interface DeckEdgeControlsProps {
     edgeHandles: EdgeHandle[];
     attachedEdgeIndices?: number[];
+    fasciaEdgeIndices?: number[];
     activeTool: string | null;
     hoverEdgeId: string | null;
     activeEdgeId: string | null;
@@ -28,6 +29,7 @@ interface DeckEdgeControlsProps {
 export const DeckEdgeControls = React.memo(function DeckEdgeControls({
     edgeHandles,
     attachedEdgeIndices = [],
+    fasciaEdgeIndices = [],
     activeTool,
     hoverEdgeId,
     onEdgeDown,
@@ -50,16 +52,19 @@ export const DeckEdgeControls = React.memo(function DeckEdgeControls({
                 edgeHandles.map((handle) => {
                     const isHovered = hoverEdgeId === handle.id;
                     const isWallEdge = attachedEdgeIndices.includes(handle.startIndex);
+                    const isFasciaEdge = fasciaEdgeIndices.includes(handle.startIndex);
 
-                    // Style logic from original
-                    const strokeColor = isWallEdge
-                        ? "#444"
-                        : isHovered
-                            ? "#2463ff"
-                            : "rgba(169, 212, 255, 1)";
+                    // Style logic - prioritize fascia (red) over wall (gray)
+                    const strokeColor = isFasciaEdge
+                        ? "#ff4444"
+                        : isWallEdge
+                            ? "#444"
+                            : isHovered
+                                ? "#2463ff"
+                                : "rgba(169, 212, 255, 1)";
 
-                    const strokeWidth = isWallEdge ? 16 : 14;
-                    const dashArray = isWallEdge ? "10,6" : undefined;
+                    const strokeWidth = (isWallEdge || isFasciaEdge) ? 16 : 14;
+                    const dashArray = (isWallEdge || isFasciaEdge) ? "10,6" : undefined;
 
                     // Cursor logic
                     let cursor = "move"; // default for diagonal
@@ -79,7 +84,7 @@ export const DeckEdgeControls = React.memo(function DeckEdgeControls({
                                 strokeWidth={strokeWidth}
                                 strokeDasharray={dashArray}
                                 pointerEvents="none"
-                                opacity={isWallEdge ? 1 : 0.6}
+                                opacity={(isWallEdge || isFasciaEdge) ? 1 : 0.6}
                             />
                             {/* Hit Area */}
                             <line

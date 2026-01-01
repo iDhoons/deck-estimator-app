@@ -6,7 +6,7 @@ import { type ProjectState, persistence } from "../utils/persistence";
 import { useHistory } from "./useHistory";
 import { INITIAL_PLAN, SHAPE_PRESETS, VIEWBOX_CENTER } from "../constants/defaults";
 import { metaFromHolePoints } from "../geometry/cutouts";
-import { centerShapeToCanvasNoScale, buildCirclePoints, circleSegmentsForSagitta } from "../geometry/shapes";
+import { centerShapeToCanvasNoScale } from "../geometry/shapes";
 import { isPointInsidePolygon, polygonCentroid } from "../geometry/polygon";
 import { MIN_EDGE_SPAN_MM, updateEdgeLength, EDGE_LENGTH_STEP_MM } from "../geometry/edges";
 
@@ -16,7 +16,6 @@ function detectShapeType(pointCount: number): "free" | ShapeType {
     if (pointCount === 4) return "rectangle";
     if (pointCount === 6) return "lShape";
     if (pointCount === 8) return "tShape";
-    if (pointCount === 16) return "circle";
     return "free";
 }
 
@@ -57,25 +56,32 @@ export function useDeckProject() {
             const nextAttached = (prev.plan.attachedEdgeIndices ?? []).filter(
                 (i: number) => i >= 0 && i < updatedPolygon.outer.length
             );
-            const prevHoles = prev.plan.polygon.holes ?? [];
+            const nextFascia = (prev.plan.fasciaEdgeIndices ?? []).filter(
+                (i: number) => i >= 0 && i < updatedPolygon.outer.length
+            );
+            const updatedHoles = updatedPolygon.holes ?? [];
             const nextHoles: { xMm: number; yMm: number }[][] = [];
-            const keptIndices: number[] = [];
+            const nextMeta: CutoutMeta[] = [];
 
-            for (let i = 0; i < prevHoles.length; i++) {
-                const hole = prevHoles[i];
+            // Process all holes from updatedPolygon
+            for (let i = 0; i < updatedHoles.length; i++) {
+                const hole = updatedHoles[i];
                 const ok =
                     hole.length >= 3 &&
                     hole.every((p) => isPointInsidePolygon({ x: p.xMm, y: p.yMm }, updatedPolygon.outer));
                 if (ok) {
                     nextHoles.push(hole);
-                    keptIndices.push(i);
+                    // Try to find matching meta from previous state, otherwise generate new
+                    if (i < prev.cutoutsMeta.length) {
+                        nextMeta.push(prev.cutoutsMeta[i]);
+                    } else {
+                        // New hole - generate metadata
+                        nextMeta.push(metaFromHolePoints(hole));
+                    }
                 }
             }
 
-            // 2. Sync Cutout Meta
-            const nextMeta = keptIndices.map((i) => prev.cutoutsMeta[i]);
-
-            // 3. Detect Shape Type
+            // 4. Detect Shape Type
             let nextShapeType = prev.shapeType;
             if (prev.shapeType !== "free") {
                 const detected = detectShapeType(updatedPolygon.outer.length);
@@ -94,6 +100,7 @@ export function useDeckProject() {
                     ...prev.plan,
                     polygon: { ...updatedPolygon, holes: nextHoles.length > 0 ? nextHoles : undefined },
                     attachedEdgeIndices: nextAttached,
+                    fasciaEdgeIndices: nextFascia,
                 },
                 cutoutsMeta: nextMeta,
                 shapeType: nextShapeType,
@@ -223,9 +230,17 @@ export function useDeckProject() {
 
         changeCutout: (index: number, nextMeta: CutoutMeta) => {
             setProject((prev) => {
-                const newMetas = prev.cutoutsMeta.map((m, i) => (i === index ? nextMeta : m));
                 const holes = prev.plan.polygon.holes ?? [];
                 if (index < 0 || index >= holes.length) return prev;
+
+                // Ensure newMetas has the correct length and includes the updated metadata
+                const newMetas = [...prev.cutoutsMeta];
+                // Extend array if needed
+                while (newMetas.length <= index) {
+                    newMetas.push(metaFromHolePoints(holes[newMetas.length]));
+                }
+                newMetas[index] = nextMeta;
+
                 const prevHole = holes[index];
 
                 const safeW = Math.max(1, Math.round(nextMeta.widthMm));
@@ -244,11 +259,6 @@ export function useDeckProject() {
                         { xMm: cx + w / 2, yMm: cy + h / 2 },
                         { xMm: cx - w / 2, yMm: cy + h / 2 },
                     ];
-                } else if (safeMeta.shape === "circle") {
-                    const d = Math.max(MIN_EDGE_SPAN_MM, Math.min(safeMeta.widthMm, safeMeta.heightMm));
-                    const r = d / 2;
-                    const seg = circleSegmentsForSagitta(r, 10);
-                    nextHole = buildCirclePoints({ xMm: safeMeta.xMm, yMm: safeMeta.yMm }, r, seg);
                 } else {
                     // Custom scaling logic for free shapes
                     let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;

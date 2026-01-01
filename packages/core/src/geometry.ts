@@ -1,5 +1,29 @@
 import type { Point, Polygon, LineSegment } from "./types";
 
+/**
+ * Calculate distance from a point to a line segment
+ * @param px - X coordinate of the point
+ * @param py - Y coordinate of the point
+ * @param seg - Line segment with x1, y1, x2, y2
+ * @returns Distance in mm
+ */
+export function pointToSegmentDistance(
+  px: number,
+  py: number,
+  seg: { x1: number; y1: number; x2: number; y2: number }
+): number {
+  const vx = seg.x2 - seg.x1;
+  const vy = seg.y2 - seg.y1;
+  const wx = px - seg.x1;
+  const wy = py - seg.y1;
+  const vv = vx * vx + vy * vy;
+  if (vv <= 1e-9) return Math.hypot(px - seg.x1, py - seg.y1);
+  const t = Math.max(0, Math.min(1, (wx * vx + wy * vy) / vv));
+  const cx = seg.x1 + t * vx;
+  const cy = seg.y1 + t * vy;
+  return Math.hypot(px - cx, py - cy);
+}
+
 export function degToRad(deg: number): number {
   return (deg * Math.PI) / 180;
 }
@@ -12,12 +36,15 @@ export function rotatePoint(p: Point, rad: number): Point {
 export function rotatePolygon(poly: Polygon, rad: number): Polygon {
   return {
     outer: poly.outer.map(p => rotatePoint(p, rad)),
-    holes: poly.holes?.map(h => h.map(p => rotatePoint(p, rad)))
+    holes: poly.holes
+      ?.filter((h): h is Point[] => h != null && Array.isArray(h) && h.length > 0)
+      .map(h => h.map(p => rotatePoint(p, rad)))
   };
 }
 
 /** Signed area (mm^2). */
 export function polygonAreaSigned(points: Point[]): number {
+  if (!points || !Array.isArray(points)) return 0;
   const n = points.length;
   if (n < 3) return 0;
   let sum = 0;
@@ -35,7 +62,9 @@ export function polygonAreaAbs(points: Point[]): number {
 
 export function polygonAreaMm2(poly: Polygon): number {
   const outer = polygonAreaAbs(poly.outer);
-  const holes = (poly.holes ?? []).reduce((acc, h) => acc + polygonAreaAbs(h), 0);
+  const holes = (poly.holes ?? [])
+    .filter((h): h is Point[] => h != null && Array.isArray(h) && h.length > 0)
+    .reduce((acc, h) => acc + polygonAreaAbs(h), 0);
   return Math.max(0, outer - holes);
 }
 
@@ -87,15 +116,17 @@ function segmentsLengthFromIntersections(xs: number[]): number {
   return len;
 }
 
-/** y=const에서 Polygon(outer - holes)의 “교차 길이 합(mm)” */
+/** y=const에서 Polygon(outer - holes)의 "교차 길이 합(mm)" */
 export function polygonSpanAtY(poly: Polygon, y: number): number {
   const outerXs = intersectionsWithHorizontalScan(poly.outer, y);
   const outerLen = segmentsLengthFromIntersections(outerXs);
 
-  const holeLens = (poly.holes ?? []).reduce((acc, h) => {
-    const xs = intersectionsWithHorizontalScan(h, y);
-    return acc + segmentsLengthFromIntersections(xs);
-  }, 0);
+  const holeLens = (poly.holes ?? [])
+    .filter((h): h is Point[] => h != null && Array.isArray(h) && h.length > 0)
+    .reduce((acc, h) => {
+      const xs = intersectionsWithHorizontalScan(h, y);
+      return acc + segmentsLengthFromIntersections(xs);
+    }, 0);
 
   return Math.max(0, outerLen - holeLens);
 }
@@ -105,7 +136,9 @@ export function polygonSpanAtX(poly: Polygon, x: number): number {
   const swap = (ring: Point[]) => ring.map(p => ({ xMm: p.yMm, yMm: p.xMm }));
   const swapped: Polygon = {
     outer: swap(poly.outer),
-    holes: poly.holes?.map(swap)
+    holes: poly.holes
+      ?.filter((h): h is Point[] => h != null && Array.isArray(h) && h.length > 0)
+      .map(swap)
   };
   return polygonSpanAtY(swapped, x);
 }
@@ -132,7 +165,9 @@ export function isPointInPolygon(p: Point, poly: Polygon): boolean {
   if (!isPointInRing(p, poly.outer)) return false;
   if (poly.holes) {
     for (const h of poly.holes) {
-      if (isPointInRing(p, h)) return false;
+      if (h != null && Array.isArray(h) && h.length > 0 && isPointInRing(p, h)) {
+        return false;
+      }
     }
   }
   return true;
@@ -151,10 +186,18 @@ export function getClippedGridLines(
   const bb = bbox(poly.outer);
   const min = axis === "x" ? bb.minX : bb.minY;
   const max = axis === "x" ? bb.maxX : bb.maxY;
-  
+
   const eps = 0.5;
-  let pos = min + eps;
-  
+
+  // Start from center and distribute symmetrically
+  const center = (min + max) / 2;
+  const range = max - min;
+  const numLines = Math.floor(range / spacingMm);
+
+  // Calculate starting position to make it symmetric
+  const totalSpan = numLines * spacingMm;
+  let pos = center - totalSpan / 2 + eps;
+
   const segments: LineSegment[] = [];
 
   while (pos <= max - eps) {
@@ -179,6 +222,7 @@ export function getClippedGridLines(
       
       if (poly.holes && poly.holes.length > 0) {
         for (const hole of poly.holes) {
+          if (!hole || !Array.isArray(hole) || hole.length === 0) continue;
           const holeRing = axis === "x" ? hole.map(p => ({ xMm: p.yMm, yMm: p.xMm })) : hole;
           const holeIntersections = intersectionsWithHorizontalScan(holeRing, pos);
           

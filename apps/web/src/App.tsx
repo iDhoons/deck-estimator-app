@@ -31,6 +31,9 @@ export default function App() {
   const [showResults, setShowResults] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  // Track if free-form polygon is closed (completed)
+  const [isFreeFormClosed, setIsFreeFormClosed] = useState(false);
+
   // --- Persistence Handlers
   const handleSave = () => {
     persistence.saveToLocal(project);
@@ -76,14 +79,13 @@ export default function App() {
     return buildCutPlan(plan, PRODUCT_DEFAULTS, rules);
   }, [effectiveMode, plan, rules]);
 
-  const edgeList = useMemo(() => getEdgeList(plan.polygon.outer), [plan]);
+  const edgeList = useMemo(() => getEdgeList(plan.polygon.outer), [plan.polygon.outer]);
 
   const shapeOptions = useMemo(
     () => [
       { id: "rectangle", label: SHAPE_PRESETS.rectangle.label },
       { id: "lShape", label: SHAPE_PRESETS.lShape.label },
       { id: "tShape", label: SHAPE_PRESETS.tShape.label },
-      { id: "circle", label: SHAPE_PRESETS.circle.label },
       { id: "free", label: "자유형" },
     ],
     []
@@ -121,14 +123,6 @@ export default function App() {
     [edgeList, shapeType]
   );
 
-  const circleRadiusMm = useMemo(() => {
-    if (shapeType !== "circle") return null;
-    const pts = plan.polygon.outer;
-    if (pts.length < 3) return null;
-    const c = polygonCentroid(pts);
-    const sum = pts.reduce((acc, p) => acc + Math.hypot(p.xMm - c.xMm, p.yMm - c.yMm), 0);
-    return sum / pts.length;
-  }, [plan.polygon.outer, shapeType]);
 
 
   // --- Gate screen
@@ -194,7 +188,6 @@ export default function App() {
   const {
     applyPresetShape,
     changeEdgeLength,
-    changeCircleRadius,
     setPlan: setPlanAction,
     updatePolygon,
     addCutout,
@@ -203,8 +196,15 @@ export default function App() {
   } = actions;
 
   // --- Free Drawing Condition
-  // If shapeType is 'free', ALWAYS show FreeDrawCanvas (both for new and existing polygons)
-  const showFreeDraw = shapeType === "free";
+  // Show FreeDrawCanvas only when:
+  // 1. shapeType is 'free' AND
+  // 2. polygon is not closed yet (user hasn't clicked on first vertex to complete)
+  // Once the polygon is closed, use DeckCanvas for consistent editing experience
+  const isFreeShape = shapeType === "free";
+  const showFreeDraw = isFreeShape && !isFreeFormClosed;
+
+  // DEBUG
+  console.log('[DEBUG App] shapeType:', shapeType, 'isFreeFormClosed:', isFreeFormClosed, 'showFreeDraw:', showFreeDraw, 'outer.length:', plan.polygon.outer.length, 'edgeList.length:', edgeList.length);
 
   // --- Main screen
   return (
@@ -237,15 +237,22 @@ export default function App() {
         <ControlsPanel
           shapeOptions={shapeOptions}
           selectedShapeId={shapeType}
-          onSelectShape={(shapeId) => applyPresetShape(shapeId as ShapeType)}
+          onSelectShape={(shapeId) => {
+            applyPresetShape(shapeId as ShapeType);
+            // Reset free-form closed state when switching shapes
+            if (shapeId === "free") {
+              setIsFreeFormClosed(false);
+            } else {
+              // For presets, mark as closed since they're complete shapes
+              setIsFreeFormClosed(true);
+            }
+          }}
           dimensions={showFreeDraw ? [] : dimensionItems}
           onChangeDimensionLength={(edgeId, lengthMm) => {
             const target = dimensionItems.find((edge) => edge.id === edgeId);
             if (!target) return false;
             return changeEdgeLength(target.startIndex, lengthMm);
           }}
-          circleRadiusMm={circleRadiusMm ?? undefined}
-          onChangeCircleRadiusMm={(next) => changeCircleRadius(next)}
           onToggleResults={() => setShowResults((v) => !v)}
           showResults={showResults}
           substructureAuto={{
@@ -266,6 +273,17 @@ export default function App() {
           onDeleteCutout={deleteCutout}
           cutoutsMeta={cutoutsMeta}
           onChangeCutout={changeCutout}
+          attachedEdgeIndices={plan.attachedEdgeIndices}
+          onChangeAttachedEdgeIndices={(indices) => {
+            console.log('[DEBUG App] onChangeAttachedEdgeIndices called with:', indices);
+            setPlanAction((prev) => ({ ...prev, attachedEdgeIndices: indices }));
+          }}
+          fasciaEdgeIndices={plan.fasciaEdgeIndices}
+          onChangeFasciaEdgeIndices={(indices) => {
+            console.log('[DEBUG App] onChangeFasciaEdgeIndices called with:', indices);
+            setPlanAction((prev) => ({ ...prev, fasciaEdgeIndices: indices }));
+          }}
+          allEdges={edgeList}
         />
 
         <section className="canvas-pane">
@@ -277,6 +295,7 @@ export default function App() {
                   initialPoints={plan.polygon.outer}
                   onPolygonComplete={(points) => {
                     updatePolygon({ outer: points });
+                    setIsFreeFormClosed(true);
                   }}
                   onPolygonChange={(points) => {
                     updatePolygon({ outer: points });
@@ -287,16 +306,18 @@ export default function App() {
                   polygon={plan.polygon}
                   viewMode={viewMode}
                   onChangePolygon={updatePolygon}
-                  onSelectShape={(shapeId) => applyPresetShape(shapeId as ShapeType)}
                   structureLayout={out.structureLayout}
                   shapeType={shapeType}
                   attachedEdgeIndices={plan.attachedEdgeIndices ?? []}
                   onChangeAttachedEdgeIndices={(next) =>
                     setPlanAction((prev) => ({ ...prev, attachedEdgeIndices: next }))
                   }
+                  fasciaEdgeIndices={plan.fasciaEdgeIndices ?? []}
                   onToggleViewMode={() =>
                     setViewMode((prev) => (prev === "deck" ? "substructure" : "deck"))
                   }
+                  cutoutsMeta={cutoutsMeta}
+                  onChangeCutout={changeCutout}
                 />
               )}
             </div>

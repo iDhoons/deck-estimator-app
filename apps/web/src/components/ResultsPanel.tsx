@@ -197,33 +197,17 @@ export function ResultsPanel({
                     <b>{out.stairs.items.reduce((sum, it) => sum + it.stepCount, 0)} 단</b>
                   </div>
                   <div style={{ display: "flex", justifyContent: "space-between", fontSize: 14 }}>
-                    <span>디딤판(상판) 필요 수량</span>
-                    <b>{out.stairs.treads.pieces} 장</b>
+                    <span>디딤판(상판) 면적</span>
+                    <b>{out.stairs.treadAreaM2.toFixed(2)} ㎡</b>
                   </div>
                   <div style={{ display: "flex", justifyContent: "space-between", fontSize: 14 }}>
-                    <span>측판(스트링거)</span>
-                    <b>{out.stairs.stringers.totalQty} 개</b>
+                    <span>높이판(라이저) 면적</span>
+                    <b>{out.stairs.riserAreaM2.toFixed(2)} ㎡</b>
                   </div>
-                  <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13, color: "#666" }}>
-                    <span>측판 총 길이</span>
-                    <span>{out.stairs.stringers.totalLengthMm} mm</span>
+                  <div style={{ display: "flex", justifyContent: "space-between", fontSize: 14, borderTop: "1px solid #ddd", paddingTop: 6, marginTop: 2 }}>
+                    <span style={{ fontWeight: 600 }}>총 면적</span>
+                    <b>{out.stairs.totalAreaM2.toFixed(2)} ㎡</b>
                   </div>
-                  <div style={{ display: "flex", justifyContent: "space-between", fontSize: 14 }}>
-                    <span>측판 자재({out.stairs.stringers.stockLengthMm}mm) 필요 수량</span>
-                    <b>{out.stairs.stringers.pieces} 장</b>
-                  </div>
-                  {out.stairs.risers && (
-                    <div style={{ display: "flex", justifyContent: "space-between", fontSize: 14 }}>
-                      <span>챌판(막힘형) 필요 수량</span>
-                      <b>{out.stairs.risers.pieces} 장</b>
-                    </div>
-                  )}
-                  {out.stairs.landing?.padsQty && (
-                    <div style={{ display: "flex", justifyContent: "space-between", fontSize: 14 }}>
-                      <span>하단 패드(판석)</span>
-                      <b>{out.stairs.landing.padsQty} 개</b>
-                    </div>
-                  )}
                 </div>
               </div>
             )}

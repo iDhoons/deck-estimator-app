@@ -19,6 +19,14 @@ export type StairConfig = {
   stepDepthMm: number;
   stepHeightMm: number;
   closedRisers?: boolean;
+
+  /** 기초 설정 (수동 입력) */
+  foundation?: {
+    /** 패드 수량 */
+    padsQty?: number;
+    /** 파일 수량 */
+    pilesQty?: number;
+  };
 };
 
 export type Plan = {
@@ -36,6 +44,9 @@ export type Plan = {
 
   /** 벽체(ledger)로 선택된 외곽 변의 startIndex 목록 (복수 선택 가능) */
   attachedEdgeIndices?: number[];
+
+  /** Fascia(클래딩)로 선택된 외곽 변의 startIndex 목록 (복수 선택 가능) */
+  fasciaEdgeIndices?: number[];
 
   /** 하부구조 길이 수동 오버라이드 (기본값=자동 계산) */
   substructureOverrides?: {
@@ -138,10 +149,10 @@ export type Quantities = {
     postAnchorsQty?: number;
   };
 
-  /** 계단 자재 내역(하부구조 포함) */
+  /** 계단 자재 내역 (상판 + 높이판 면적 계산) */
   stairs?: {
     enabled: boolean;
-    
+
     items: {
       id: string;
       stepCount: number;
@@ -150,29 +161,12 @@ export type Quantities = {
       widthMm: number;
     }[];
 
-    stringers: {
-      totalQty: number;
-      totalLengthMm: number;
-      stockLengthMm: number;
-      pieces: number;
-    };
-    treads: {
-      totalUsedLengthMm: number;
-      pieces: number;
-    };
-    risers?: {
-      totalUsedLengthMm: number;
-      pieces: number;
-    };
-    landing?: {
-      padsQty?: number;
-      pilesQty?: number;
-    };
-    fasteners?: {
-      mode: FasteningMode;
-      screws?: number;
-      clips?: number;
-    };
+    /** 디딤판(상판) 총 면적 (㎡) */
+    treadAreaM2: number;
+    /** 높이판(라이저) 총 면적 (㎡) */
+    riserAreaM2: number;
+    /** 계단 총 면적 (상판 + 높이판) (㎡) */
+    totalAreaM2: number;
   };
 
   structureLayout?: StructureLayout;

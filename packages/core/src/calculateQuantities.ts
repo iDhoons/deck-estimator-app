@@ -7,7 +7,8 @@ import {
   polygonSpanAtY,
   getClippedGridLines,
   isPointInPolygon,
-  rotatePoint
+  rotatePoint,
+  pointToSegmentDistance
 } from "./geometry.js";
 import { calculateStairs } from "./calculateStairs.js";
 
@@ -130,19 +131,6 @@ export function calculateQuantities(
     return segs;
   })();
 
-  function pointToSegDistMm(px: number, py: number, s: { x1: number; y1: number; x2: number; y2: number }): number {
-    const vx = s.x2 - s.x1;
-    const vy = s.y2 - s.y1;
-    const wx = px - s.x1;
-    const wy = py - s.y1;
-    const vv = vx * vx + vy * vy;
-    if (vv <= 1e-9) return Math.hypot(px - s.x1, py - s.y1);
-    const t = Math.max(0, Math.min(1, (wx * vx + wy * vy) / vv));
-    const cx = s.x1 + t * vx;
-    const cy = s.y1 + t * vy;
-    return Math.hypot(px - cx, py - cy);
-  }
-
   // 벽체 변에 "딱 붙은" bearer(거의 동일선)만 제거(과도 삭제 방지)
   if (wallEdgesRot.length > 0) {
     const epsMm = 5;
@@ -150,7 +138,7 @@ export function calculateQuantities(
       const mx = (b.x1 + b.x2) / 2;
       const my = (b.y1 + b.y2) / 2;
       for (const s of wallEdgesRot) {
-        if (pointToSegDistMm(mx, my, s) <= epsMm) return false;
+        if (pointToSegmentDistance(mx, my, s) <= epsMm) return false;
       }
       return true;
     });
@@ -190,19 +178,50 @@ export function calculateQuantities(
 
   const pileCandidates: Point[] = [];
 
-  // (A) 테두리 기초: 벽체 선택 변 제외한 외곽 변을 따라 배치
-  for (let i = 0; i < outer.length; i++) {
-    if (attachedEdgeIndices.includes(i)) continue;
-    const p1 = outer[i];
-    const p2 = outer[(i + 1) % outer.length];
-    pileCandidates.push(
-      ...samplePointsOnSegment({ x1: p1.xMm, y1: p1.yMm, x2: p2.xMm, y2: p2.yMm }, spacingMm)
-    );
+  // Helper: Check if a point is near a line segment
+  function isPointNearSegment(p: Point, seg: { x1: number; y1: number; x2: number; y2: number }, toleranceMm = 10): boolean {
+    const dx = seg.x2 - seg.x1;
+    const dy = seg.y2 - seg.y1;
+    const lenSq = dx * dx + dy * dy;
+    if (lenSq < 1e-9) return Math.hypot(p.xMm - seg.x1, p.yMm - seg.y1) <= toleranceMm;
+
+    const t = Math.max(0, Math.min(1, ((p.xMm - seg.x1) * dx + (p.yMm - seg.y1) * dy) / lenSq));
+    const projX = seg.x1 + t * dx;
+    const projY = seg.y1 + t * dy;
+    return Math.hypot(p.xMm - projX, p.yMm - projY) <= toleranceMm;
   }
 
-  // (B) 내부 기초: 멍에(bearer) 선분을 따라 배치
+  // (B) 멍에의 끝점만 기초로 배치 (멍에와 외곽이 만나는 지점)
   for (const b of bearers) {
-    pileCandidates.push(...samplePointsOnSegment(b, spacingMm));
+    pileCandidates.push({ xMm: b.x1, yMm: b.y1 });
+    pileCandidates.push({ xMm: b.x2, yMm: b.y2 });
+  }
+
+  // (A) 외곽 변 중 멍에가 교차하지 않는 변에는 멍에 간격으로 기초 배치
+  for (let i = 0; i < outer.length; i++) {
+    if (attachedEdgeIndices.includes(i)) continue;
+
+    const p1 = outer[i];
+    const p2 = outer[(i + 1) % outer.length];
+    const edgeSeg = { x1: p1.xMm, y1: p1.yMm, x2: p2.xMm, y2: p2.yMm };
+
+    // Check if any bearer crosses this edge
+    let hasBearerCrossing = false;
+    for (const b of bearers) {
+      // Check if bearer endpoints are near this edge
+      if (isPointNearSegment({ xMm: b.x1, yMm: b.y1 }, edgeSeg) ||
+          isPointNearSegment({ xMm: b.x2, yMm: b.y2 }, edgeSeg)) {
+        hasBearerCrossing = true;
+        break;
+      }
+    }
+
+    // If no bearer crosses this edge, add piles at bearer spacing
+    if (!hasBearerCrossing) {
+      pileCandidates.push(
+        ...samplePointsOnSegment(edgeSeg, spacingMm)
+      );
+    }
   }
 
   // 중복 제거(코너/겹침)

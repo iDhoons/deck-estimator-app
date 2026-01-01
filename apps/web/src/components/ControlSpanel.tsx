@@ -1,6 +1,48 @@
-/* eslint-disable react-hooks/set-state-in-effect */
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useRef, useState, memo } from "react";
 import { EDGE_LENGTH_STEP_MM, MIN_EDGE_SPAN_MM } from "../geometry/edges";
+
+// Toggle Switch Component - extracted outside to prevent recreation on each render
+const ToggleSwitch = memo(function ToggleSwitch({
+  checked,
+  onChange,
+  label,
+}: {
+  checked: boolean;
+  onChange: (checked: boolean) => void;
+  label: string;
+}) {
+  return (
+    <div
+      onClick={() => onChange(!checked)}
+      style={{ display: "flex", gap: 8, alignItems: "center", justifyContent: "space-between", cursor: "pointer" }}
+    >
+      <span style={{ fontSize: 13 }}>{label}</span>
+      <div
+        style={{
+          width: 40,
+          height: 20,
+          borderRadius: 10,
+          background: checked ? "#4CAF50" : "#ccc",
+          position: "relative",
+          transition: "background 0.2s",
+        }}
+      >
+        <div
+          style={{
+            width: 16,
+            height: 16,
+            borderRadius: "50%",
+            background: "#fff",
+            position: "absolute",
+            top: 2,
+            left: checked ? 22 : 2,
+            transition: "left 0.2s",
+          }}
+        />
+      </div>
+    </div>
+  );
+});
 
 type ShapeOption = {
   id: string;
@@ -26,6 +68,10 @@ type StairConfig = {
   stepDepthMm: number;
   stepHeightMm: number;
   closedRisers?: boolean;
+  foundation?: {
+    padsQty?: number;
+    pilesQty?: number;
+  };
 };
 
 export function ControlsPanel({
@@ -34,8 +80,6 @@ export function ControlsPanel({
   onSelectShape,
   dimensions,
   onChangeDimensionLength,
-  circleRadiusMm,
-  onChangeCircleRadiusMm,
   onToggleResults,
   showResults,
   substructureAuto,
@@ -48,14 +92,17 @@ export function ControlsPanel({
   onDeleteCutout,
   cutoutsMeta,
   onChangeCutout,
+  attachedEdgeIndices,
+  onChangeAttachedEdgeIndices,
+  fasciaEdgeIndices,
+  onChangeFasciaEdgeIndices,
+  allEdges,
 }: {
   shapeOptions: ShapeOption[];
   selectedShapeId: string;
   onSelectShape: (id: string) => void;
   dimensions: DimensionItem[];
   onChangeDimensionLength: (edgeId: string, nextLengthMm: number) => boolean;
-  circleRadiusMm?: number | null;
-  onChangeCircleRadiusMm?: (nextRadiusMm: number) => boolean;
   onToggleResults: () => void;
   showResults: boolean;
   substructureAuto?: { primaryLenM: number; secondaryLenM: number };
@@ -79,94 +126,79 @@ export function ControlsPanel({
     index: number,
     next: { shape: CutoutShape; xMm: number; yMm: number; widthMm: number; heightMm: number }
   ) => void;
+  attachedEdgeIndices?: number[];
+  onChangeAttachedEdgeIndices?: (indices: number[]) => void;
+  fasciaEdgeIndices?: number[];
+  onChangeFasciaEdgeIndices?: (indices: number[]) => void;
+  allEdges?: DimensionItem[];
 }) {
-  const sectionIds = ["floor", "cutout", "steps", "decking", "edging", "laying", "substructure"] as const;
+  const sectionIds = ["floor", "cutout", "steps", "sides", "decking", "edging", "laying", "substructure"] as const;
   const [openMap, setOpenMap] = useState<Record<string, boolean>>(() => {
     const initial: Record<string, boolean> = {};
     for (const id of sectionIds) initial[id] = id === "floor";
     return initial;
   });
-  const [dimensionInputs, setDimensionInputs] = useState<Record<string, string>>({});
-  const [circleRadiusInput, setCircleRadiusInput] = useState<string>("");
+
+  // Track which inputs are being actively edited (to prevent overwriting user input)
+  const [editingInputs, setEditingInputs] = useState<Record<string, string>>({});
   const [cutoutOpenMap, setCutoutOpenMap] = useState<Record<number, boolean>>({});
-  const [cutoutInputs, setCutoutInputs] = useState<Record<string, string>>({});
 
   // Stairs local state
   const [stairOpenMap, setStairOpenMap] = useState<Record<string, boolean>>({});
-  const [stairInputs, setStairInputs] = useState<Record<string, string>>({});
+
+  // Decking spec local state
+  const [deckingSpec, setDeckingSpec] = useState({
+    thicknessMm: 25,
+    widthMm: 140,
+    lengthMm: 3000,
+  });
+  const [deckingCustomInput, setDeckingCustomInput] = useState({
+    thickness: "",
+    width: "",
+    length: "",
+  });
+
+  // Track previous cutouts length to auto-open new cutouts
+  const prevCutoutsLengthRef = useRef(cutouts?.length ?? 0);
+  const currentCutoutsLength = cutouts?.length ?? 0;
+  if (currentCutoutsLength > prevCutoutsLengthRef.current) {
+    // New cutout added - open it
+    setCutoutOpenMap({ [currentCutoutsLength - 1]: true });
+  } else if (currentCutoutsLength === 0 && prevCutoutsLengthRef.current > 0) {
+    setCutoutOpenMap({});
+  }
+  prevCutoutsLengthRef.current = currentCutoutsLength;
 
   const quickSummary = (text: string) => (
     <p style={{ fontSize: 13, color: "#555", margin: 0 }}>{text}</p>
   );
 
-  const formatLength = useMemo(
-    () => (lengthMm: number) => Math.round(lengthMm).toLocaleString("ko-KR"),
+  const formatLength = useCallback(
+    (lengthMm: number) => Math.round(lengthMm).toLocaleString("ko-KR"),
     []
   );
 
-  useEffect(() => {
-    const nextInputs: Record<string, string> = {};
-    for (const dim of dimensions) {
-      nextInputs[dim.id] = formatLength(dim.lengthMm);
-    }
-    setDimensionInputs(nextInputs);
-  }, [dimensions, formatLength]);
+  // Helper to get input value - returns editing value if being edited, otherwise derived from props
+  const getInputValue = useCallback(
+    (key: string, defaultValue: string) => {
+      return editingInputs[key] !== undefined ? editingInputs[key] : defaultValue;
+    },
+    [editingInputs]
+  );
 
-  useEffect(() => {
-    if (selectedShapeId !== "circle") return;
-    if (circleRadiusMm == null) {
-      setCircleRadiusInput("");
-      return;
-    }
-    setCircleRadiusInput(formatLength(circleRadiusMm));
-  }, [circleRadiusMm, formatLength, selectedShapeId]);
+  // Helper to start editing an input
+  const startEditing = useCallback((key: string, value: string) => {
+    setEditingInputs((prev) => ({ ...prev, [key]: value }));
+  }, []);
 
-  useEffect(() => {
-    const count = cutouts?.length ?? 0;
-    if (count <= 0) {
-      setCutoutOpenMap({});
-      return;
-    }
-    // 단일 오픈: 새로 추가되면 마지막 개구부만 펼치고 나머지는 접음
-    setCutoutOpenMap(() => ({ [count - 1]: true }));
-  }, [cutouts?.length]);
-
-  useEffect(() => {
-    const holes = cutouts ?? [];
-    const metas = cutoutsMeta ?? [];
-    const next: Record<string, string> = {};
-    for (let i = 0; i < holes.length; i++) {
-      const m = metas[i];
-      if (!m) continue;
-      next[`${i}-x`] = String(Math.round(m.xMm));
-      next[`${i}-y`] = String(Math.round(m.yMm));
-      next[`${i}-w`] = String(Math.round(m.widthMm));
-      next[`${i}-h`] = String(Math.round(m.heightMm));
-    }
-    setCutoutInputs(next);
-  }, [cutouts, cutoutsMeta]);
-
-  // Sync stair inputs
-  useEffect(() => {
-    const items = stairs?.items ?? [];
-    const next: Record<string, string> = {};
-    for (const item of items) {
-      next[`${item.id}-start`] = String(Math.round(item.startMm));
-      next[`${item.id}-width`] = String(Math.round(item.widthMm));
-      next[`${item.id}-depth`] = String(Math.round(item.stepDepthMm));
-      next[`${item.id}-height`] = String(Math.round(item.stepHeightMm));
-    }
-
-    // Stringer overrides
-    const overrides = stairs?.stringerMaterialOverrides;
-    if (overrides) {
-      if (overrides.thicknessMm) next["str-thk"] = String(Math.round(overrides.thicknessMm));
-      if (overrides.widthMm) next["str-wid"] = String(Math.round(overrides.widthMm));
-      if (overrides.stockLengthMm) next["str-len"] = String(Math.round(overrides.stockLengthMm));
-    }
-
-    setStairInputs((prev) => ({ ...prev, ...next }));
-  }, [stairs]);
+  // Helper to finish editing an input
+  const finishEditing = useCallback((key: string) => {
+    setEditingInputs((prev) => {
+      const next = { ...prev };
+      delete next[key];
+      return next;
+    });
+  }, []);
 
   const toggleSection = (id: string) => {
     setOpenMap((prev) => ({ ...prev, [id]: !prev[id] }));
@@ -188,112 +220,57 @@ export function ControlsPanel({
       </div>
 
       <div style={{ marginTop: 16 }}>
-        {selectedShapeId === "circle" ? (
-          <>
-            <div style={{ fontWeight: 600, marginBottom: 8 }}>반지름</div>
-            <div className="dimension-list">
-              <div className="dimension-item">
-                <span>R</span>
-                <div className="dimension-input-row">
-                  <input
-                    type="text"
-                    inputMode="decimal"
-                    value={circleRadiusInput}
-                    onChange={(e) => setCircleRadiusInput(e.target.value)}
-                    onFocus={(e) => e.currentTarget.select()}
-                    onBlur={() => {
-                      const raw = (circleRadiusInput ?? "").trim();
-                      const parsed = Number(raw.replace(/,/g, ""));
-                      const snapped = Math.round(parsed / EDGE_LENGTH_STEP_MM) * EDGE_LENGTH_STEP_MM;
-                      if (!Number.isFinite(parsed) || snapped <= 0 || snapped < MIN_EDGE_SPAN_MM) {
-                        if (circleRadiusMm != null) setCircleRadiusInput(formatLength(circleRadiusMm));
-                        return;
-                      }
-                      const ok = onChangeCircleRadiusMm?.(snapped) ?? false;
-                      if (!ok) {
-                        if (circleRadiusMm != null) setCircleRadiusInput(formatLength(circleRadiusMm));
-                        return;
-                      }
-                      setCircleRadiusInput(formatLength(snapped));
-                    }}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter") e.currentTarget.blur();
-                      if (e.key === "Escape") {
-                        if (circleRadiusMm != null) setCircleRadiusInput(formatLength(circleRadiusMm));
-                        e.currentTarget.blur();
-                      }
-                    }}
-                    className="dimension-input"
-                  />
-                  <span className="dimension-unit">mm</span>
-                </div>
-              </div>
-            </div>
-          </>
-        ) : (
-          <>
+        <>
             <div style={{ fontWeight: 600, marginBottom: 8 }}>변 길이</div>
             {dimensions.length > 0 ? (
               <div className="dimension-list">
-                {dimensions.map((item) => (
-                  <div key={item.id} className="dimension-item">
-                    <span>{item.label}</span>
-                    <div className="dimension-input-row">
-                      <input
-                        type="text"
-                        inputMode="decimal"
-                        value={dimensionInputs[item.id] ?? ""}
-                        onChange={(e) =>
-                          setDimensionInputs((prev) => ({ ...prev, [item.id]: e.target.value }))
-                        }
-                        onFocus={(e) => e.currentTarget.select()}
-                        onBlur={() => {
-                          const raw = (dimensionInputs[item.id] ?? "").trim();
-                          const parsed = Number(raw.replace(/,/g, ""));
-                          const snapped = Math.round(parsed / EDGE_LENGTH_STEP_MM) * EDGE_LENGTH_STEP_MM;
-                          if (!Number.isFinite(parsed) || snapped <= 0 || snapped < MIN_EDGE_SPAN_MM) {
-                            setDimensionInputs((prev) => ({
-                              ...prev,
-                              [item.id]: formatLength(item.lengthMm),
-                            }));
-                            return;
-                          }
-                          const ok = onChangeDimensionLength(item.id, snapped);
-                          if (!ok) {
-                            setDimensionInputs((prev) => ({
-                              ...prev,
-                              [item.id]: formatLength(item.lengthMm),
-                            }));
-                            return;
-                          }
-                          setDimensionInputs((prev) => ({
-                            ...prev,
-                            [item.id]: formatLength(snapped),
-                          }));
-                        }}
-                        onKeyDown={(e) => {
-                          if (e.key === "Enter") {
-                            e.currentTarget.blur();
-                          } else if (e.key === "Escape") {
-                            setDimensionInputs((prev) => ({
-                              ...prev,
-                              [item.id]: formatLength(item.lengthMm),
-                            }));
-                            e.currentTarget.blur();
-                          }
-                        }}
-                        className="dimension-input"
-                      />
-                      <span className="dimension-unit">mm</span>
+                {dimensions.map((item) => {
+                  const inputKey = `dim-${item.id}`;
+                  const displayValue = getInputValue(inputKey, formatLength(item.lengthMm));
+                  return (
+                    <div key={item.id} className="dimension-item">
+                      <span>{item.label}</span>
+                      <div className="dimension-input-row">
+                        <input
+                          type="text"
+                          inputMode="decimal"
+                          value={displayValue}
+                          onChange={(e) => startEditing(inputKey, e.target.value)}
+                          onFocus={(e) => {
+                            startEditing(inputKey, formatLength(item.lengthMm));
+                            e.currentTarget.select();
+                          }}
+                          onBlur={() => {
+                            const raw = (editingInputs[inputKey] ?? "").trim();
+                            const parsed = Number(raw.replace(/,/g, ""));
+                            const snapped = Math.round(parsed / EDGE_LENGTH_STEP_MM) * EDGE_LENGTH_STEP_MM;
+                            if (!Number.isFinite(parsed) || snapped <= 0 || snapped < MIN_EDGE_SPAN_MM) {
+                              finishEditing(inputKey);
+                              return;
+                            }
+                            onChangeDimensionLength(item.id, snapped);
+                            finishEditing(inputKey);
+                          }}
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter") {
+                              e.currentTarget.blur();
+                            } else if (e.key === "Escape") {
+                              finishEditing(inputKey);
+                              e.currentTarget.blur();
+                            }
+                          }}
+                          className="dimension-input"
+                        />
+                        <span className="dimension-unit">mm</span>
+                      </div>
                     </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             ) : (
               <div style={{ fontSize: 12, color: "#777" }}>변 정보를 찾을 수 없습니다.</div>
             )}
           </>
-        )}
       </div>
     </>
   );
@@ -335,42 +312,40 @@ export function ControlsPanel({
               onChangeCutout(idx, { ...meta, ...partial });
             };
 
-            const field = (key: "x" | "y" | "w" | "h") => cutoutInputs[`${idx}-${key}`] ?? "";
-            const setField = (key: "x" | "y" | "w" | "h", v: string) =>
-              setCutoutInputs((prev) => ({ ...prev, [`${idx}-${key}`]: v }));
+            const getFieldValue = (key: "x" | "y" | "w" | "h") => {
+              const inputKey = `cutout-${idx}-${key}`;
+              if (editingInputs[inputKey] !== undefined) return editingInputs[inputKey];
+              if (!meta) return "";
+              const v = key === "x" ? meta.xMm : key === "y" ? meta.yMm : key === "w" ? meta.widthMm : meta.heightMm;
+              return String(Math.round(v));
+            };
 
-            const revertField = (key: "x" | "y" | "w" | "h") => {
-              if (!meta) return;
-              const v =
-                key === "x"
-                  ? meta.xMm
-                  : key === "y"
-                    ? meta.yMm
-                    : key === "w"
-                      ? meta.widthMm
-                      : meta.heightMm;
-              setField(key, String(Math.round(v)));
+            const onFieldChange = (key: "x" | "y" | "w" | "h", value: string) => {
+              startEditing(`cutout-${idx}-${key}`, value);
             };
 
             const commitNumber = (key: "x" | "y" | "w" | "h") => {
-              if (!meta || !onChangeCutout) return;
-              const raw = (field(key) ?? "").trim();
+              const inputKey = `cutout-${idx}-${key}`;
+              if (!meta || !onChangeCutout) {
+                finishEditing(inputKey);
+                return;
+              }
+              const raw = (editingInputs[inputKey] ?? "").trim();
               const parsed = Number(raw.replace(/,/g, ""));
               if (!Number.isFinite(parsed)) {
-                revertField(key);
+                finishEditing(inputKey);
                 return;
               }
               if (key === "x") update({ xMm: parsed });
               else if (key === "y") update({ yMm: parsed });
               else if (key === "w") {
                 const nextW = Math.max(1, parsed);
-                if (shape === "circle") update({ widthMm: nextW, heightMm: nextW });
-                else update({ widthMm: nextW });
+                update({ widthMm: nextW });
               } else {
                 const nextH = Math.max(1, parsed);
-                if (shape === "circle") update({ widthMm: nextH, heightMm: nextH });
-                else update({ heightMm: nextH });
+                update({ heightMm: nextH });
               }
+              finishEditing(inputKey);
             };
 
             return (
@@ -418,7 +393,6 @@ export function ControlsPanel({
                       {(
                         [
                           { id: "rectangle" as const, label: "□" },
-                          { id: "circle" as const, label: "○" },
                           { id: "free" as const, label: "✎" },
                         ] as const
                       ).map((s) => {
@@ -455,8 +429,8 @@ export function ControlsPanel({
                           <input
                             type="text"
                             inputMode="decimal"
-                            value={field("x")}
-                            onChange={(e) => setField("x", e.target.value)}
+                            value={getFieldValue("x")}
+                            onChange={(e) => onFieldChange("x", e.target.value)}
                             onBlur={() => commitNumber("x")}
                             style={{ width: "100%", padding: "8px 10px", borderRadius: 8, border: "1px solid #ccc" }}
                           />
@@ -466,8 +440,8 @@ export function ControlsPanel({
                           <input
                             type="text"
                             inputMode="decimal"
-                            value={field("y")}
-                            onChange={(e) => setField("y", e.target.value)}
+                            value={getFieldValue("y")}
+                            onChange={(e) => onFieldChange("y", e.target.value)}
                             onBlur={() => commitNumber("y")}
                             style={{ width: "100%", padding: "8px 10px", borderRadius: 8, border: "1px solid #ccc" }}
                           />
@@ -483,8 +457,8 @@ export function ControlsPanel({
                           <input
                             type="text"
                             inputMode="decimal"
-                            value={field("w")}
-                            onChange={(e) => setField("w", e.target.value)}
+                            value={getFieldValue("w")}
+                            onChange={(e) => onFieldChange("w", e.target.value)}
                             onBlur={() => commitNumber("w")}
                             style={{ width: "100%", padding: "8px 10px", borderRadius: 8, border: "1px solid #ccc" }}
                           />
@@ -494,8 +468,8 @@ export function ControlsPanel({
                           <input
                             type="text"
                             inputMode="decimal"
-                            value={field("h")}
-                            onChange={(e) => setField("h", e.target.value)}
+                            value={getFieldValue("h")}
+                            onChange={(e) => onFieldChange("h", e.target.value)}
                             onBlur={() => commitNumber("h")}
                             style={{ width: "100%", padding: "8px 10px", borderRadius: 8, border: "1px solid #ccc" }}
                           />
@@ -583,15 +557,28 @@ export function ControlsPanel({
               onChangeStairs({ ...stairs, items: nextItems });
             };
 
-            const getField = (key: string) => stairInputs[`${item.id}-${key}`] ?? "";
-            const setField = (key: string, v: string) => setStairInputs((prev) => ({ ...prev, [`${item.id}-${key}`]: v }));
+            const getStairField = (key: string) => {
+              const inputKey = `stair-${item.id}-${key}`;
+              if (editingInputs[inputKey] !== undefined) return editingInputs[inputKey];
+              if (key === "start") return String(Math.round(item.startMm));
+              if (key === "width") return String(Math.round(item.widthMm));
+              if (key === "depth") return String(Math.round(item.stepDepthMm));
+              if (key === "height") return String(Math.round(item.stepHeightMm));
+              if (key === "pads") return item.foundation?.padsQty !== undefined ? String(item.foundation.padsQty) : "";
+              if (key === "piles") return item.foundation?.pilesQty !== undefined ? String(item.foundation.pilesQty) : "";
+              return "";
+            };
+
+            const setStairField = (key: string, v: string) => {
+              startEditing(`stair-${item.id}-${key}`, v);
+            };
 
             const commitField = (key: "start" | "width" | "depth" | "height") => {
-              const raw = getField(key);
+              const inputKey = `stair-${item.id}-${key}`;
+              const raw = editingInputs[inputKey] ?? "";
               const val = Number(raw.replace(/,/g, ""));
               if (!Number.isFinite(val) || val < 0) {
-                // revert
-                setField(key, String(Math.round(key === "start" ? item.startMm : key === "width" ? item.widthMm : key === "depth" ? item.stepDepthMm : item.stepHeightMm)));
+                finishEditing(inputKey);
                 return;
               }
 
@@ -599,6 +586,7 @@ export function ControlsPanel({
               else if (key === "width") updateItem({ widthMm: Math.max(100, val) });
               else if (key === "depth") updateItem({ stepDepthMm: Math.max(10, val) });
               else if (key === "height") updateItem({ stepHeightMm: Math.max(10, val) });
+              finishEditing(inputKey);
             };
 
             const totalH = item.stepCount * item.stepHeightMm;
@@ -665,7 +653,7 @@ export function ControlsPanel({
                         onChange={(e) => updateItem({ sideIndex: Number(e.target.value) })}
                         style={{ padding: "4px 8px", borderRadius: 6, borderColor: "#ccc" }}
                       >
-                        {dimensions.map((dim) => (
+                        {(allEdges || dimensions).map((dim) => (
                           <option key={dim.id} value={dim.startIndex}>{dim.label}</option>
                         ))}
                       </select>
@@ -676,8 +664,8 @@ export function ControlsPanel({
                       <input
                         type="text"
                         inputMode="decimal"
-                        value={getField("start")}
-                        onChange={(e) => setField("start", e.target.value)}
+                        value={getStairField("start")}
+                        onChange={(e) => setStairField("start", e.target.value)}
                         onBlur={() => commitField("start")}
                         style={{ width: 100, padding: "6px 8px", borderRadius: 6, border: "1px solid #ccc" }}
                       />
@@ -688,8 +676,8 @@ export function ControlsPanel({
                       <input
                         type="text"
                         inputMode="decimal"
-                        value={getField("width")}
-                        onChange={(e) => setField("width", e.target.value)}
+                        value={getStairField("width")}
+                        onChange={(e) => setStairField("width", e.target.value)}
                         onBlur={() => commitField("width")}
                         style={{ width: 100, padding: "6px 8px", borderRadius: 6, border: "1px solid #ccc" }}
                       />
@@ -720,8 +708,8 @@ export function ControlsPanel({
                         <input
                           type="text"
                           inputMode="decimal"
-                          value={getField("depth")}
-                          onChange={(e) => setField("depth", e.target.value)}
+                          value={getStairField("depth")}
+                          onChange={(e) => setStairField("depth", e.target.value)}
                           onBlur={() => commitField("depth")}
                           style={{ width: "100%", padding: "6px 8px", borderRadius: 6, border: "1px solid #ccc" }}
                         />
@@ -731,8 +719,8 @@ export function ControlsPanel({
                         <input
                           type="text"
                           inputMode="decimal"
-                          value={getField("height")}
-                          onChange={(e) => setField("height", e.target.value)}
+                          value={getStairField("height")}
+                          onChange={(e) => setStairField("height", e.target.value)}
                           onBlur={() => commitField("height")}
                           style={{ width: "100%", padding: "6px 8px", borderRadius: 6, border: "1px solid #ccc" }}
                         />
@@ -747,6 +735,55 @@ export function ControlsPanel({
                       />
                       <span style={{ fontSize: 13, color: "#555" }}>막힘형 (챌판 적용)</span>
                     </label>
+
+                    <div style={{ fontWeight: 600, color: "#333", marginTop: 8 }}>기초 설정</div>
+
+                    <div style={{ display: "flex", gap: 10 }}>
+                      <div style={{ flex: 1 }}>
+                        <div style={{ fontSize: 12, color: "#666", marginBottom: 4 }}>패드 수량</div>
+                        <input
+                          type="text"
+                          inputMode="decimal"
+                          value={getStairField("pads")}
+                          onChange={(e) => setStairField("pads", e.target.value)}
+                          onBlur={() => {
+                            const inputKey = `stair-${item.id}-pads`;
+                            const raw = editingInputs[inputKey] ?? "";
+                            const val = Number(raw.replace(/,/g, ""));
+                            if (raw === "" || !Number.isFinite(val) || val < 0) {
+                              updateItem({ foundation: { ...item.foundation, padsQty: undefined } });
+                            } else {
+                              updateItem({ foundation: { ...item.foundation, padsQty: Math.floor(val) } });
+                            }
+                            finishEditing(inputKey);
+                          }}
+                          placeholder="0"
+                          style={{ width: "100%", padding: "6px 8px", borderRadius: 6, border: "1px solid #ccc" }}
+                        />
+                      </div>
+                      <div style={{ flex: 1 }}>
+                        <div style={{ fontSize: 12, color: "#666", marginBottom: 4 }}>파일 수량</div>
+                        <input
+                          type="text"
+                          inputMode="decimal"
+                          value={getStairField("piles")}
+                          onChange={(e) => setStairField("piles", e.target.value)}
+                          onBlur={() => {
+                            const inputKey = `stair-${item.id}-piles`;
+                            const raw = editingInputs[inputKey] ?? "";
+                            const val = Number(raw.replace(/,/g, ""));
+                            if (raw === "" || !Number.isFinite(val) || val < 0) {
+                              updateItem({ foundation: { ...item.foundation, pilesQty: undefined } });
+                            } else {
+                              updateItem({ foundation: { ...item.foundation, pilesQty: Math.floor(val) } });
+                            }
+                            finishEditing(inputKey);
+                          }}
+                          placeholder="0"
+                          style={{ width: "100%", padding: "6px 8px", borderRadius: 6, border: "1px solid #ccc" }}
+                        />
+                      </div>
+                    </div>
 
                     <div style={{ fontSize: 12, color: "#888", background: "#f9f9f9", padding: 8, borderRadius: 6 }}>
                       전체 치수: {Math.round(item.widthMm)} x {Math.round(totalD)} x {Math.round(totalH)} mm
@@ -769,11 +806,11 @@ export function ControlsPanel({
                 type="text"
                 inputMode="decimal"
                 placeholder="자동"
-                value={stairInputs["str-thk"] ?? ""}
-                onChange={(e) => setStairInputs((p) => ({ ...p, "str-thk": e.target.value }))}
+                value={getInputValue("str-thk", stairs.stringerMaterialOverrides?.thicknessMm ? String(Math.round(stairs.stringerMaterialOverrides.thicknessMm)) : "")}
+                onChange={(e) => startEditing("str-thk", e.target.value)}
                 onBlur={() => {
-                  if (!stairs || !onChangeStairs) return;
-                  const val = Number((stairInputs["str-thk"] ?? "").replace(/,/g, ""));
+                  if (!onChangeStairs) return;
+                  const val = Number((editingInputs["str-thk"] ?? "").replace(/,/g, ""));
                   onChangeStairs({
                     ...stairs,
                     stringerMaterialOverrides: {
@@ -781,6 +818,7 @@ export function ControlsPanel({
                       thicknessMm: (val > 0) ? val : undefined
                     }
                   });
+                  finishEditing("str-thk");
                 }}
                 style={{ width: 100, padding: "6px 8px", borderRadius: 6, border: "1px solid #ccc" }}
               />
@@ -791,11 +829,11 @@ export function ControlsPanel({
                 type="text"
                 inputMode="decimal"
                 placeholder="자동"
-                value={stairInputs["str-wid"] ?? ""}
-                onChange={(e) => setStairInputs((p) => ({ ...p, "str-wid": e.target.value }))}
+                value={getInputValue("str-wid", stairs.stringerMaterialOverrides?.widthMm ? String(Math.round(stairs.stringerMaterialOverrides.widthMm)) : "")}
+                onChange={(e) => startEditing("str-wid", e.target.value)}
                 onBlur={() => {
-                  if (!stairs || !onChangeStairs) return;
-                  const val = Number((stairInputs["str-wid"] ?? "").replace(/,/g, ""));
+                  if (!onChangeStairs) return;
+                  const val = Number((editingInputs["str-wid"] ?? "").replace(/,/g, ""));
                   onChangeStairs({
                     ...stairs,
                     stringerMaterialOverrides: {
@@ -803,6 +841,7 @@ export function ControlsPanel({
                       widthMm: (val > 0) ? val : undefined
                     }
                   });
+                  finishEditing("str-wid");
                 }}
                 style={{ width: 100, padding: "6px 8px", borderRadius: 6, border: "1px solid #ccc" }}
               />
@@ -813,11 +852,11 @@ export function ControlsPanel({
                 type="text"
                 inputMode="decimal"
                 placeholder="자동"
-                value={stairInputs["str-len"] ?? ""}
-                onChange={(e) => setStairInputs((p) => ({ ...p, "str-len": e.target.value }))}
+                value={getInputValue("str-len", stairs.stringerMaterialOverrides?.stockLengthMm ? String(Math.round(stairs.stringerMaterialOverrides.stockLengthMm)) : "")}
+                onChange={(e) => startEditing("str-len", e.target.value)}
                 onBlur={() => {
-                  if (!stairs || !onChangeStairs) return;
-                  const val = Number((stairInputs["str-len"] ?? "").replace(/,/g, ""));
+                  if (!onChangeStairs) return;
+                  const val = Number((editingInputs["str-len"] ?? "").replace(/,/g, ""));
                   onChangeStairs({
                     ...stairs,
                     stringerMaterialOverrides: {
@@ -825,6 +864,7 @@ export function ControlsPanel({
                       stockLengthMm: (val > 0) ? val : undefined
                     }
                   });
+                  finishEditing("str-len");
                 }}
                 style={{ width: 100, padding: "6px 8px", borderRadius: 6, border: "1px solid #ccc" }}
               />
@@ -854,42 +894,303 @@ export function ControlsPanel({
     </div>
   );
 
-  const [subInputs, setSubInputs] = useState<{ primary: string; secondary: string }>({ primary: "", secondary: "" });
-  useEffect(() => {
-    const p = substructureOverridesMm?.primaryLenMm;
-    const s = substructureOverridesMm?.secondaryLenMm;
-    setSubInputs({
-      primary: p !== undefined ? String(Math.round(p)) : "",
-      secondary: s !== undefined ? String(Math.round(s)) : "",
-    });
-  }, [substructureOverridesMm?.primaryLenMm, substructureOverridesMm?.secondaryLenMm]);
+  const edgesForSides = (allEdges && allEdges.length > 0) ? allEdges : dimensions;
+  const hasEdges = edgesForSides.length > 0;
+
+  // DEBUG
+  console.log('[DEBUG ControlsPanel] allEdges:', allEdges?.length, 'dimensions:', dimensions.length, 'edgesForSides:', edgesForSides.length, 'hasEdges:', hasEdges, 'attachedEdgeIndices:', attachedEdgeIndices);
+
+  const sidesContent = (
+    <div style={{ display: "grid", gap: 12 }}>
+      {!hasEdges ? (
+        <div style={{ fontSize: 13, color: "#999", padding: "12px 0" }}>
+          도형을 먼저 완성해주세요.
+        </div>
+      ) : (
+        <>
+          {/* Attached Edges (Ledger) Section */}
+          <div>
+            <div style={{ fontSize: 13, color: "#666", marginBottom: 8 }}>
+              어떤 면이 벽이나 건물에 붙어있나요?
+            </div>
+            <div style={{ fontSize: 12, color: "#999", marginBottom: 8 }}>
+              (회색으로 표시됩니다)
+            </div>
+
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+              {edgesForSides.map((dim) => {
+                const isAttached = (attachedEdgeIndices ?? []).includes(dim.startIndex);
+                // allEdges uses fromLabel/toLabel, dimensions uses label
+                const edgeLabel = 'fromLabel' in dim ? `${dim.fromLabel}–${dim.toLabel}` : dim.label;
+                return (
+                  <ToggleSwitch
+                    key={dim.id}
+                    label={edgeLabel}
+                    checked={isAttached}
+                    onChange={(checked) => {
+                      console.log('[DEBUG Toggle] Attached onChange called:', edgeLabel, 'checked:', checked, 'onChangeAttachedEdgeIndices:', !!onChangeAttachedEdgeIndices);
+                      if (!onChangeAttachedEdgeIndices) return;
+                      const current = new Set(attachedEdgeIndices ?? []);
+                      if (checked) current.add(dim.startIndex);
+                      else current.delete(dim.startIndex);
+                      const newIndices = Array.from(current).sort((a, b) => a - b);
+                      console.log('[DEBUG Toggle] Calling onChangeAttachedEdgeIndices with:', newIndices);
+                      onChangeAttachedEdgeIndices(newIndices);
+                    }}
+                  />
+                );
+              })}
+            </div>
+          </div>
+
+          {/* Fascia Section */}
+          <div>
+            <div style={{ fontSize: 13, color: "#666", marginBottom: 8 }}>
+              어떤 면에 측면 마감을 하나요?
+            </div>
+            <div style={{ fontSize: 12, color: "#999", marginBottom: 8 }}>
+              (빨간색으로 표시됩니다)
+            </div>
+
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+              {edgesForSides.map((dim) => {
+                const hasFascia = (fasciaEdgeIndices ?? []).includes(dim.startIndex);
+                // allEdges uses fromLabel/toLabel, dimensions uses label
+                const edgeLabel = 'fromLabel' in dim ? `${dim.fromLabel}–${dim.toLabel}` : dim.label;
+                return (
+                  <ToggleSwitch
+                    key={dim.id}
+                    label={edgeLabel}
+                    checked={hasFascia}
+                    onChange={(checked) => {
+                      if (!onChangeFasciaEdgeIndices) return;
+                      const current = new Set(fasciaEdgeIndices ?? []);
+                      if (checked) current.add(dim.startIndex);
+                      else current.delete(dim.startIndex);
+                      onChangeFasciaEdgeIndices(Array.from(current).sort((a, b) => a - b));
+                    }}
+                  />
+                );
+              })}
+            </div>
+          </div>
+        </>
+      )}
+    </div>
+  );
+
+  const getSubValue = (key: "primary" | "secondary") => {
+    const inputKey = `sub-${key}`;
+    if (editingInputs[inputKey] !== undefined) return editingInputs[inputKey];
+    const val = key === "primary" ? substructureOverridesMm?.primaryLenMm : substructureOverridesMm?.secondaryLenMm;
+    return val !== undefined ? String(Math.round(val)) : "";
+  };
 
   const applySubOverride = (key: "primary" | "secondary") => {
-    if (!onChangeSubstructureOverridesMm) return;
-    const raw = (key === "primary" ? subInputs.primary : subInputs.secondary).trim();
+    const inputKey = `sub-${key}`;
+    if (!onChangeSubstructureOverridesMm) {
+      finishEditing(inputKey);
+      return;
+    }
+    const raw = (editingInputs[inputKey] ?? "").trim();
     const parsed = raw === "" ? undefined : Number(raw.replace(/,/g, ""));
-    if (parsed !== undefined && (!Number.isFinite(parsed) || parsed <= 0)) return;
+    if (parsed !== undefined && (!Number.isFinite(parsed) || parsed <= 0)) {
+      finishEditing(inputKey);
+      return;
+    }
     const next = { ...(substructureOverridesMm ?? {}) };
     if (key === "primary") next.primaryLenMm = parsed;
     else next.secondaryLenMm = parsed;
     onChangeSubstructureOverridesMm(next);
+    finishEditing(inputKey);
   };
 
   const sections = [
     { id: "floor", title: "평면도", content: floorPlanContent },
     { id: "cutout", title: "개구부", content: cutoutContent },
-    { id: "steps", title: "계단 및 측면", content: stairsContent },
+    { id: "steps", title: "계단", content: stairsContent },
+    { id: "sides", title: "측면", content: sidesContent },
     {
       id: "decking",
       title: "데크재",
-      content: (
-        <div style={{ display: "grid", gap: 12 }}>
-          {quickSummary("선호하는 데크재 형태와 마감을 선택하세요.")}
-          <button className="controls-action-button" type="button" onClick={onToggleResults}>
-            {showResults ? "결과 숨기기" : "결과 보기"}
-          </button>
-        </div>
-      ),
+      content: (() => {
+        const isThicknessCustom = ![19, 20, 25].includes(deckingSpec.thicknessMm) || deckingCustomInput.thickness !== "";
+        const isWidthCustom = ![95, 120, 140, 150].includes(deckingSpec.widthMm) || deckingCustomInput.width !== "";
+        const isLengthCustom = ![2000, 2400, 2800, 3000].includes(deckingSpec.lengthMm) || deckingCustomInput.length !== "";
+
+        return (
+          <div style={{ display: "grid", gap: 12 }}>
+            {quickSummary("데크재 사양을 선택하세요.")}
+
+            {/* 가로 배열: 두께, 폭, 길이 */}
+            <div style={{ display: "flex", gap: 8 }}>
+              {/* 두께 */}
+              <div style={{ flex: 1, display: "grid", gap: 4 }}>
+                <div style={{ fontSize: 12, fontWeight: 600, color: "#333" }}>두께</div>
+                {isThicknessCustom ? (
+                  <input
+                    type="text"
+                    inputMode="decimal"
+                    placeholder="두께"
+                    value={deckingCustomInput.thickness || String(deckingSpec.thicknessMm)}
+                    onChange={(e) => setDeckingCustomInput((prev) => ({ ...prev, thickness: e.target.value }))}
+                    onBlur={() => {
+                      const val = Number(deckingCustomInput.thickness.replace(/,/g, ""));
+                      if (Number.isFinite(val) && val > 0) {
+                        setDeckingSpec((prev) => ({ ...prev, thicknessMm: val }));
+                      }
+                      // 프리셋 값이면 드롭다운으로 복귀
+                      if ([19, 20, 25].includes(val)) {
+                        setDeckingCustomInput((prev) => ({ ...prev, thickness: "" }));
+                      }
+                    }}
+                    onKeyDown={(e) => {
+                      if (e.key === "Escape") {
+                        // ESC로 드롭다운 모드로 복귀
+                        setDeckingCustomInput((prev) => ({ ...prev, thickness: "" }));
+                        if (![19, 20, 25].includes(deckingSpec.thicknessMm)) {
+                          setDeckingSpec((prev) => ({ ...prev, thicknessMm: 25 }));
+                        }
+                      }
+                    }}
+                    autoFocus
+                    style={{ width: "100%", padding: "8px 6px", borderRadius: 8, border: "1px solid #ccc", fontSize: 13 }}
+                  />
+                ) : (
+                  <select
+                    value={deckingSpec.thicknessMm}
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      if (val === "custom") {
+                        setDeckingCustomInput((prev) => ({ ...prev, thickness: String(deckingSpec.thicknessMm) }));
+                      } else {
+                        setDeckingSpec((prev) => ({ ...prev, thicknessMm: Number(val) }));
+                      }
+                    }}
+                    style={{ width: "100%", padding: "8px 6px", borderRadius: 8, border: "1px solid #ccc", fontSize: 13 }}
+                  >
+                    <option value={19}>19</option>
+                    <option value={20}>20</option>
+                    <option value={25}>25</option>
+                    <option value="custom">직접</option>
+                  </select>
+                )}
+              </div>
+
+              {/* 폭 */}
+              <div style={{ flex: 1, display: "grid", gap: 4 }}>
+                <div style={{ fontSize: 12, fontWeight: 600, color: "#333" }}>폭</div>
+                {isWidthCustom ? (
+                  <input
+                    type="text"
+                    inputMode="decimal"
+                    placeholder="폭"
+                    value={deckingCustomInput.width || String(deckingSpec.widthMm)}
+                    onChange={(e) => setDeckingCustomInput((prev) => ({ ...prev, width: e.target.value }))}
+                    onBlur={() => {
+                      const val = Number(deckingCustomInput.width.replace(/,/g, ""));
+                      if (Number.isFinite(val) && val > 0) {
+                        setDeckingSpec((prev) => ({ ...prev, widthMm: val }));
+                      }
+                      // 프리셋 값이면 드롭다운으로 복귀
+                      if ([95, 120, 140, 150].includes(val)) {
+                        setDeckingCustomInput((prev) => ({ ...prev, width: "" }));
+                      }
+                    }}
+                    onKeyDown={(e) => {
+                      if (e.key === "Escape") {
+                        setDeckingCustomInput((prev) => ({ ...prev, width: "" }));
+                        if (![95, 120, 140, 150].includes(deckingSpec.widthMm)) {
+                          setDeckingSpec((prev) => ({ ...prev, widthMm: 140 }));
+                        }
+                      }
+                    }}
+                    autoFocus
+                    style={{ width: "100%", padding: "8px 6px", borderRadius: 8, border: "1px solid #ccc", fontSize: 13 }}
+                  />
+                ) : (
+                  <select
+                    value={deckingSpec.widthMm}
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      if (val === "custom") {
+                        setDeckingCustomInput((prev) => ({ ...prev, width: String(deckingSpec.widthMm) }));
+                      } else {
+                        setDeckingSpec((prev) => ({ ...prev, widthMm: Number(val) }));
+                      }
+                    }}
+                    style={{ width: "100%", padding: "8px 6px", borderRadius: 8, border: "1px solid #ccc", fontSize: 13 }}
+                  >
+                    <option value={95}>95</option>
+                    <option value={120}>120</option>
+                    <option value={140}>140</option>
+                    <option value={150}>150</option>
+                    <option value="custom">직접</option>
+                  </select>
+                )}
+              </div>
+
+              {/* 길이 */}
+              <div style={{ flex: 1, display: "grid", gap: 4 }}>
+                <div style={{ fontSize: 12, fontWeight: 600, color: "#333" }}>길이</div>
+                {isLengthCustom ? (
+                  <input
+                    type="text"
+                    inputMode="decimal"
+                    placeholder="길이"
+                    value={deckingCustomInput.length || String(deckingSpec.lengthMm)}
+                    onChange={(e) => setDeckingCustomInput((prev) => ({ ...prev, length: e.target.value }))}
+                    onBlur={() => {
+                      const val = Number(deckingCustomInput.length.replace(/,/g, ""));
+                      if (Number.isFinite(val) && val > 0) {
+                        setDeckingSpec((prev) => ({ ...prev, lengthMm: val }));
+                      }
+                      // 프리셋 값이면 드롭다운으로 복귀
+                      if ([2000, 2400, 2800, 3000].includes(val)) {
+                        setDeckingCustomInput((prev) => ({ ...prev, length: "" }));
+                      }
+                    }}
+                    onKeyDown={(e) => {
+                      if (e.key === "Escape") {
+                        setDeckingCustomInput((prev) => ({ ...prev, length: "" }));
+                        if (![2000, 2400, 2800, 3000].includes(deckingSpec.lengthMm)) {
+                          setDeckingSpec((prev) => ({ ...prev, lengthMm: 3000 }));
+                        }
+                      }
+                    }}
+                    autoFocus
+                    style={{ width: "100%", padding: "8px 6px", borderRadius: 8, border: "1px solid #ccc", fontSize: 13 }}
+                  />
+                ) : (
+                  <select
+                    value={deckingSpec.lengthMm}
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      if (val === "custom") {
+                        setDeckingCustomInput((prev) => ({ ...prev, length: String(deckingSpec.lengthMm) }));
+                      } else {
+                        setDeckingSpec((prev) => ({ ...prev, lengthMm: Number(val) }));
+                      }
+                    }}
+                    style={{ width: "100%", padding: "8px 6px", borderRadius: 8, border: "1px solid #ccc", fontSize: 13 }}
+                  >
+                    <option value={2000}>2000</option>
+                    <option value={2400}>2400</option>
+                    <option value={2800}>2800</option>
+                    <option value={3000}>3000</option>
+                    <option value="custom">직접</option>
+                  </select>
+                )}
+              </div>
+            </div>
+
+            {/* 현재 선택된 사양 표시 */}
+            <div style={{ fontSize: 12, color: "#888", background: "#f9f9f9", padding: 10, borderRadius: 6 }}>
+              선택된 사양: {deckingSpec.thicknessMm} × {deckingSpec.widthMm} × {deckingSpec.lengthMm.toLocaleString()} mm
+            </div>
+          </div>
+        );
+      })(),
     },
     {
       id: "edging",
@@ -917,13 +1218,13 @@ export function ControlsPanel({
                 type="text"
                 inputMode="decimal"
                 placeholder={substructureAuto ? `자동: ${Math.round(substructureAuto.primaryLenM * 1000)}` : "자동"}
-                value={subInputs.primary}
-                onChange={(e) => setSubInputs((p) => ({ ...p, primary: e.target.value }))}
+                value={getSubValue("primary")}
+                onChange={(e) => startEditing("sub-primary", e.target.value)}
                 onBlur={() => applySubOverride("primary")}
                 onKeyDown={(e) => {
                   if (e.key === "Enter") e.currentTarget.blur();
                   if (e.key === "Escape") {
-                    setSubInputs((p) => ({ ...p, primary: substructureOverridesMm?.primaryLenMm ? String(Math.round(substructureOverridesMm.primaryLenMm)) : "" }));
+                    finishEditing("sub-primary");
                     e.currentTarget.blur();
                   }
                 }}
@@ -937,13 +1238,13 @@ export function ControlsPanel({
                 type="text"
                 inputMode="decimal"
                 placeholder={substructureAuto ? `자동: ${Math.round(substructureAuto.secondaryLenM * 1000)}` : "자동"}
-                value={subInputs.secondary}
-                onChange={(e) => setSubInputs((p) => ({ ...p, secondary: e.target.value }))}
+                value={getSubValue("secondary")}
+                onChange={(e) => startEditing("sub-secondary", e.target.value)}
                 onBlur={() => applySubOverride("secondary")}
                 onKeyDown={(e) => {
                   if (e.key === "Enter") e.currentTarget.blur();
                   if (e.key === "Escape") {
-                    setSubInputs((p) => ({ ...p, secondary: substructureOverridesMm?.secondaryLenMm ? String(Math.round(substructureOverridesMm.secondaryLenMm)) : "" }));
+                    finishEditing("sub-secondary");
                     e.currentTarget.blur();
                   }
                 }}
@@ -987,6 +1288,16 @@ export function ControlsPanel({
             </div>
           );
         })}
+      </div>
+      <div style={{ padding: "12px 16px", borderTop: "1px solid #eee" }}>
+        <button
+          className="controls-action-button"
+          type="button"
+          onClick={onToggleResults}
+          style={{ width: "100%" }}
+        >
+          {showResults ? "결과 숨기기" : "결과 보기"}
+        </button>
       </div>
     </aside>
   );

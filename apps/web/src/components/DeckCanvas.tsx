@@ -22,12 +22,19 @@ import {
   polygonCentroid,
 } from "../geometry/polygon";
 import { circleSegmentsForSagitta } from "../geometry/shapes";
+import type { CutoutMeta } from "../geometry/cutouts";
 
-import { DeckGrid } from "./deck-canvas/DeckGrid";
 import { DeckPolygon } from "./deck-canvas/DeckPolygon";
 import { DeckVertexHandles } from "./deck-canvas/DeckVertexHandles";
 import { DeckEdgeControls } from "./deck-canvas/DeckEdgeControls";
 import { DeckHoles } from "./deck-canvas/DeckHoles";
+import { DeckHoleEdgeHandles } from "./deck-canvas/DeckHoleEdgeHandles";
+import {
+  CanvasControlsCenter,
+  CanvasControlsTopLeft,
+  CanvasControlsBottomLeft,
+  CanvasControlsBottomRight,
+} from "./CanvasControls";
 
 import type { ShapeType, CutoutShape } from "../types";
 
@@ -69,21 +76,26 @@ export function DeckCanvas({
   shapeType,
   attachedEdgeIndices,
   onChangeAttachedEdgeIndices,
+  fasciaEdgeIndices,
   onToggleViewMode,
   cutoutMode,
   onChangeCutoutMode,
+  cutoutsMeta,
+  onChangeCutout,
 }: {
   polygon: Polygon;
   viewMode: ViewMode;
   onChangePolygon?: (polygon: Polygon) => void;
-  onSelectShape?: (shapeId: string) => void;
   structureLayout?: StructureLayout;
   shapeType?: ShapeType;
   attachedEdgeIndices?: number[];
   onChangeAttachedEdgeIndices?: (next: number[]) => void;
+  fasciaEdgeIndices?: number[];
   onToggleViewMode?: () => void;
   cutoutMode?: CutoutMode;
   onChangeCutoutMode?: (next: CutoutMode) => void;
+  cutoutsMeta?: CutoutMeta[];
+  onChangeCutout?: (index: number, meta: CutoutMeta) => void;
 }) {
   const svgRef = useRef<SVGSVGElement | null>(null);
   const pointerIdRef = useRef<number | null>(null);
@@ -121,6 +133,24 @@ export function DeckCanvas({
     holeIndex: number;
     startWorld: { x: number; y: number };
     startHole: PlanPoint[];
+    startMeta?: CutoutMeta; // 개구부 메타데이터의 시작 상태
+    lastValidHole: PlanPoint[]; // 마지막으로 유효했던 hole 위치
+    lastValidMeta?: CutoutMeta; // 마지막으로 유효했던 meta
+  } | null>(null);
+  const holeCornerDragRef = useRef<{
+    pointerId: number;
+    holeIndex: number;
+    corner: "top-left" | "top-right" | "bottom-left" | "bottom-right";
+    startWorld: { x: number; y: number };
+    startMeta: { xMm: number; yMm: number; widthMm: number; heightMm: number; shape: CutoutShape };
+    fixedCorner: { x: number; y: number }; // 반대쪽 고정된 모서리
+  } | null>(null);
+  const holeEdgeDragRef = useRef<{
+    pointerId: number;
+    holeIndex: number;
+    edge: "top" | "right" | "bottom" | "left";
+    startWorld: { x: number; y: number };
+    startMeta: { xMm: number; yMm: number; widthMm: number; heightMm: number; shape: CutoutShape };
   } | null>(null);
   const cutoutDragRef = useRef<{ pointerId: number; shape: Exclude<CutoutShape, "free">; startWorld: { x: number; y: number } } | null>(null);
   const [draftCutoutPoints, setDraftCutoutPoints] = useState<PlanPoint[] | null>(null);
@@ -175,8 +205,6 @@ export function DeckCanvas({
     radialUnit: { x: number; y: number };
     startProj: number;
   } | null>(null);
-
-  const [hoverVertexIndex, setHoverVertexIndex] = useState<number | null>(null);
 
   // Utility: polygon의 점 개수와 패턴으로 도형 타입 판단
   const detectShapeInfo = (points: { xMm: number; yMm: number }[], _isClosed: boolean, shapeType?: ShapeType) => {
@@ -427,6 +455,152 @@ export function DeckCanvas({
         return;
       }
 
+      // Hole corner drag (resize rectangle/circle cutouts by dragging corners)
+      if (holeCornerDragRef.current && onChangeCutout) {
+        const drag = holeCornerDragRef.current;
+        if (event.pointerId !== drag.pointerId) return;
+        const world = toWorldCoords(event.clientX, event.clientY);
+        if (!world) return;
+
+        const { fixedCorner } = drag;
+
+        // Snap current position to grid
+        let snappedX = Math.round(world.x / EDGE_LENGTH_STEP_MM) * EDGE_LENGTH_STEP_MM;
+        let snappedY = Math.round(world.y / EDGE_LENGTH_STEP_MM) * EDGE_LENGTH_STEP_MM;
+
+        // Calculate new dimensions based on fixed corner and current position
+        let newWidthMm = Math.abs(snappedX - fixedCorner.x);
+        let newHeightMm = Math.abs(snappedY - fixedCorner.y);
+
+        // Ensure minimum size
+        let finalWidthMm = Math.max(MIN_EDGE_SPAN_MM, newWidthMm);
+        let finalHeightMm = Math.max(MIN_EDGE_SPAN_MM, newHeightMm);
+
+        // Calculate new center position (midpoint between fixed corner and current position)
+        let newXMm = (fixedCorner.x + snappedX) / 2;
+        let newYMm = (fixedCorner.y + snappedY) / 2;
+
+        // For circle, keep width and height equal (use the larger dimension)
+        let finalW = finalWidthMm;
+        let finalH = finalHeightMm;
+        if (drag.startMeta.shape === "circle") {
+          const maxDim = Math.max(finalWidthMm, finalHeightMm);
+          finalW = maxDim;
+          finalH = maxDim;
+        }
+
+        // Check if all 4 corners of the resized cutout are inside the outer polygon
+        const halfW = finalW / 2;
+        const halfH = finalH / 2;
+        const corners = [
+          { x: newXMm - halfW, y: newYMm - halfH },
+          { x: newXMm + halfW, y: newYMm - halfH },
+          { x: newXMm - halfW, y: newYMm + halfH },
+          { x: newXMm + halfW, y: newYMm + halfH },
+        ];
+
+        const allCornersInside = corners.every((corner) =>
+          isPointInsidePolygon(corner, polygon.outer)
+        );
+
+        // Only apply the change if all corners are inside
+        if (allCornersInside) {
+          onChangeCutout(drag.holeIndex, {
+            ...drag.startMeta,
+            xMm: newXMm,
+            yMm: newYMm,
+            widthMm: finalW,
+            heightMm: finalH,
+          });
+        }
+        return;
+      }
+
+      // Hole edge drag (resize rectangle/circle cutouts by dragging edges)
+      if (holeEdgeDragRef.current && onChangeCutout) {
+        const drag = holeEdgeDragRef.current;
+        if (event.pointerId !== drag.pointerId) return;
+        const world = toWorldCoords(event.clientX, event.clientY);
+        if (!world) return;
+
+        const { edge, startWorld, startMeta } = drag;
+        const dx = world.x - startWorld.x;
+        const dy = world.y - startWorld.y;
+
+        let newWidthMm = startMeta.widthMm;
+        let newHeightMm = startMeta.heightMm;
+        let newXMm = startMeta.xMm;
+        let newYMm = startMeta.yMm;
+
+        // 변을 드래그하면 해당 변만 움직이고 반대쪽 변은 고정
+        if (edge === "left") {
+          const halfW = startMeta.widthMm / 2;
+          const leftEdge = startMeta.xMm - halfW;
+          const rightEdge = startMeta.xMm + halfW; // 고정
+          const newLeftEdge = leftEdge + dx;
+          newWidthMm = Math.max(MIN_EDGE_SPAN_MM, rightEdge - newLeftEdge);
+          newXMm = rightEdge - newWidthMm / 2;
+        } else if (edge === "right") {
+          const halfW = startMeta.widthMm / 2;
+          const leftEdge = startMeta.xMm - halfW; // 고정
+          const rightEdge = startMeta.xMm + halfW;
+          const newRightEdge = rightEdge + dx;
+          newWidthMm = Math.max(MIN_EDGE_SPAN_MM, newRightEdge - leftEdge);
+          newXMm = leftEdge + newWidthMm / 2;
+        } else if (edge === "top") {
+          const halfH = startMeta.heightMm / 2;
+          const topEdge = startMeta.yMm - halfH;
+          const bottomEdge = startMeta.yMm + halfH; // 고정
+          const newTopEdge = topEdge + dy;
+          newHeightMm = Math.max(MIN_EDGE_SPAN_MM, bottomEdge - newTopEdge);
+          newYMm = bottomEdge - newHeightMm / 2;
+        } else if (edge === "bottom") {
+          const halfH = startMeta.heightMm / 2;
+          const topEdge = startMeta.yMm - halfH; // 고정
+          const bottomEdge = startMeta.yMm + halfH;
+          const newBottomEdge = bottomEdge + dy;
+          newHeightMm = Math.max(MIN_EDGE_SPAN_MM, newBottomEdge - topEdge);
+          newYMm = topEdge + newHeightMm / 2;
+        }
+
+        // For circle, keep width and height equal (use the larger dimension)
+        if (startMeta.shape === "circle") {
+          const maxDim = Math.max(newWidthMm, newHeightMm);
+          newWidthMm = maxDim;
+          newHeightMm = maxDim;
+        }
+
+        // Round to grid
+        const finalWidthMm = Math.round(newWidthMm / EDGE_LENGTH_STEP_MM) * EDGE_LENGTH_STEP_MM;
+        const finalHeightMm = Math.round(newHeightMm / EDGE_LENGTH_STEP_MM) * EDGE_LENGTH_STEP_MM;
+
+        // Check if all 4 corners of the resized cutout are inside the outer polygon
+        const halfW = finalWidthMm / 2;
+        const halfH = finalHeightMm / 2;
+        const corners = [
+          { x: newXMm - halfW, y: newYMm - halfH },
+          { x: newXMm + halfW, y: newYMm - halfH },
+          { x: newXMm - halfW, y: newYMm + halfH },
+          { x: newXMm + halfW, y: newYMm + halfH },
+        ];
+
+        const allCornersInside = corners.every((corner) =>
+          isPointInsidePolygon(corner, polygon.outer)
+        );
+
+        // Only apply the change if all corners are inside
+        if (allCornersInside) {
+          onChangeCutout(drag.holeIndex, {
+            ...startMeta,
+            xMm: newXMm,
+            yMm: newYMm,
+            widthMm: finalWidthMm,
+            heightMm: finalHeightMm,
+          });
+        }
+        return;
+      }
+
       // Hole move drag (drag inside cutout to move whole hole)
       if (holeMoveDragRef.current && onChangePolygon) {
         const drag = holeMoveDragRef.current;
@@ -434,13 +608,91 @@ export function DeckCanvas({
         const world = toWorldCoords(event.clientX, event.clientY);
         if (!world) return;
 
-        const dx = world.x - drag.startWorld.x;
-        const dy = world.y - drag.startWorld.y;
-        const moved = drag.startHole.map((p) => ({ xMm: p.xMm + dx, yMm: p.yMm + dy }));
-        if (!moved.every(isPointInsideOuter)) return;
+        // Safety check: ensure we have valid hole data
+        if (!drag.lastValidHole || drag.lastValidHole.length === 0 || !drag.startHole || drag.startHole.length === 0) {
+          return;
+        }
 
+        // Calculate total movement from start
+        const totalDx = world.x - drag.startWorld.x;
+        const totalDy = world.y - drag.startWorld.y;
+
+        // Calculate movement from last valid position
+        const currentDx = totalDx - (drag.lastValidHole[0].xMm - drag.startHole[0].xMm);
+        const currentDy = totalDy - (drag.lastValidHole[0].yMm - drag.startHole[0].yMm);
+
+        // Try to move from the last valid position
+        const movedHole = drag.lastValidHole.map((p) => ({ xMm: p.xMm + currentDx, yMm: p.yMm + currentDy }));
+
+        // Check if all points are inside
+        const allInside = movedHole.every((p) =>
+          isPointInsidePolygon({ x: p.xMm, y: p.yMm }, polygon.outer)
+        );
+
+        let finalHole = drag.lastValidHole;
+        let finalMeta = drag.lastValidMeta;
+
+        if (allInside) {
+          // Full movement is valid - update last valid position
+          finalHole = movedHole;
+          if (drag.lastValidMeta && onChangeCutout) {
+            finalMeta = {
+              ...drag.lastValidMeta,
+              xMm: drag.lastValidMeta.xMm + currentDx,
+              yMm: drag.lastValidMeta.yMm + currentDy,
+            };
+          }
+          drag.lastValidHole = finalHole;
+          drag.lastValidMeta = finalMeta;
+        } else {
+          // Try moving X only from last valid position
+          const movedX = drag.lastValidHole.map((p) => ({ xMm: p.xMm + currentDx, yMm: p.yMm }));
+          const xValid = movedX.every((p) =>
+            isPointInsidePolygon({ x: p.xMm, y: p.yMm }, polygon.outer)
+          );
+
+          // Try moving Y only from last valid position
+          const movedY = drag.lastValidHole.map((p) => ({ xMm: p.xMm, yMm: p.yMm + currentDy }));
+          const yValid = movedY.every((p) =>
+            isPointInsidePolygon({ x: p.xMm, y: p.yMm }, polygon.outer)
+          );
+
+          if (xValid && !yValid) {
+            // Only X movement is valid
+            finalHole = movedX;
+            if (drag.lastValidMeta && onChangeCutout) {
+              finalMeta = {
+                ...drag.lastValidMeta,
+                xMm: drag.lastValidMeta.xMm + currentDx,
+                yMm: drag.lastValidMeta.yMm,
+              };
+            }
+            drag.lastValidHole = finalHole;
+            drag.lastValidMeta = finalMeta;
+          } else if (yValid && !xValid) {
+            // Only Y movement is valid
+            finalHole = movedY;
+            if (drag.lastValidMeta && onChangeCutout) {
+              finalMeta = {
+                ...drag.lastValidMeta,
+                xMm: drag.lastValidMeta.xMm,
+                yMm: drag.lastValidMeta.yMm + currentDy,
+              };
+            }
+            drag.lastValidHole = finalHole;
+            drag.lastValidMeta = finalMeta;
+          }
+          // If neither direction is valid, keep last valid position
+        }
+
+        // Update polygon with the final position
         const holes = polygon.holes ?? [];
-        const nextHoles = holes.map((h, i) => (i === drag.holeIndex ? moved : h));
+        const nextHoles = holes.map((h, i) => (i === drag.holeIndex ? finalHole : h));
+
+        if (finalMeta && onChangeCutout) {
+          onChangeCutout(drag.holeIndex, finalMeta);
+        }
+
         onChangePolygon({ ...polygon, holes: nextHoles });
         return;
       }
@@ -644,6 +896,20 @@ export function DeckCanvas({
         svg.releasePointerCapture(holeVertexDragRef.current.pointerId);
       }
       holeVertexDragRef.current = null;
+    }
+
+    if (holeCornerDragRef.current && event.pointerId === holeCornerDragRef.current.pointerId) {
+      if (svg && svg.hasPointerCapture?.(holeCornerDragRef.current.pointerId)) {
+        svg.releasePointerCapture(holeCornerDragRef.current.pointerId);
+      }
+      holeCornerDragRef.current = null;
+    }
+
+    if (holeEdgeDragRef.current && event.pointerId === holeEdgeDragRef.current.pointerId) {
+      if (svg && svg.hasPointerCapture?.(holeEdgeDragRef.current.pointerId)) {
+        svg.releasePointerCapture(holeEdgeDragRef.current.pointerId);
+      }
+      holeEdgeDragRef.current = null;
     }
 
     if (holeMoveDragRef.current && event.pointerId === holeMoveDragRef.current.pointerId) {
@@ -918,7 +1184,6 @@ export function DeckCanvas({
         onWheel={handleWheel}
       >
         <g transform={transformGroup}>
-          <DeckGrid viewBox={viewBox} />
           {/* Substructure Rendering */}
           {isSubView && structureLayout && (
             <g pointerEvents="none">
@@ -1041,11 +1306,15 @@ export function DeckCanvas({
               if (e.button !== 0) return;
               const world = toWorldCoords(e.clientX, e.clientY);
               if (!world) return;
+              const currentHole = (polygon.holes?.[holeIndex] ?? []).map((p) => ({ ...p }));
               holeMoveDragRef.current = {
                 pointerId: e.pointerId,
                 holeIndex,
                 startWorld: world,
-                startHole: (polygon.holes?.[holeIndex] ?? []).map((p) => ({ ...p })),
+                startHole: currentHole,
+                startMeta: cutoutsMeta?.[holeIndex] ? { ...cutoutsMeta[holeIndex] } : undefined,
+                lastValidHole: currentHole,
+                lastValidMeta: cutoutsMeta?.[holeIndex] ? { ...cutoutsMeta[holeIndex] } : undefined,
               };
               setIsHoleMoving(true);
               svgRef.current?.setPointerCapture?.(e.pointerId);
@@ -1064,32 +1333,85 @@ export function DeckCanvas({
             />
           )}
 
+          <DeckHoleEdgeHandles
+            holes={polygon.holes ?? []}
+            cutoutsMeta={cutoutsMeta ?? []}
+            selectedHoleIndex={selectedHoleIndex}
+            isEditable={isEditable && activeTool !== "cutout"}
+            onCornerDown={(holeIndex, corner, e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              if (!cutoutsMeta || !cutoutsMeta[holeIndex]) return;
+              const world = toWorldCoords(e.clientX, e.clientY);
+              if (!world) return;
+              const meta = cutoutsMeta[holeIndex];
+
+              // Calculate the fixed corner (opposite corner)
+              const halfW = meta.widthMm / 2;
+              const halfH = meta.heightMm / 2;
+              let fixedCorner: { x: number; y: number };
+
+              if (corner === "top-left") {
+                fixedCorner = { x: meta.xMm + halfW, y: meta.yMm + halfH };
+              } else if (corner === "top-right") {
+                fixedCorner = { x: meta.xMm - halfW, y: meta.yMm + halfH };
+              } else if (corner === "bottom-left") {
+                fixedCorner = { x: meta.xMm + halfW, y: meta.yMm - halfH };
+              } else {
+                // bottom-right
+                fixedCorner = { x: meta.xMm - halfW, y: meta.yMm - halfH };
+              }
+
+              holeCornerDragRef.current = {
+                pointerId: e.pointerId,
+                holeIndex,
+                corner,
+                startWorld: world,
+                startMeta: { ...meta },
+                fixedCorner,
+              };
+              svgRef.current?.setPointerCapture?.(e.pointerId);
+            }}
+            onEdgeDown={(holeIndex, edge, e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              if (!cutoutsMeta || !cutoutsMeta[holeIndex]) return;
+              const world = toWorldCoords(e.clientX, e.clientY);
+              if (!world) return;
+              const meta = cutoutsMeta[holeIndex];
+
+              holeEdgeDragRef.current = {
+                pointerId: e.pointerId,
+                holeIndex,
+                edge,
+                startWorld: world,
+                startMeta: { ...meta },
+              };
+              svgRef.current?.setPointerCapture?.(e.pointerId);
+            }}
+          />
+
           <DeckVertexHandles
             outerPoints={polygon.outer}
             holes={polygon.holes}
-            hoverVertexIndex={hoverVertexIndex}
-            dragVertexIndex={dragIndex}
-            hoverHoleIndex={hoverHoleIndex}
             selectedHoleIndex={selectedHoleIndex}
             activeTool={activeTool}
             isEditable={isEditable}
+            isCircle={isCircle}
             onVertexDown={(i: number, e: React.PointerEvent) => startDrag(i)(e as any)}
-            onVertexEnter={() => { }}
-            onVertexLeave={() => { }}
             onHoleVertexDown={(hIdx, vIdx, e) => {
               e.preventDefault();
               e.stopPropagation();
               holeVertexDragRef.current = { pointerId: e.pointerId, holeIndex: hIdx, vertexIndex: vIdx };
               svgRef.current?.setPointerCapture?.(e.pointerId);
             }}
-            onHoleVertexEnter={(hIdx) => setHoverHoleIndex(hIdx)}
-            onHoleVertexLeave={(hIdx) => setHoverHoleIndex((prev) => (prev === hIdx ? null : prev))}
           />
 
           {enableEdgeControls && (
             <DeckEdgeControls
               edgeHandles={edgeHandles}
               attachedEdgeIndices={attachedEdgeIndices}
+              fasciaEdgeIndices={fasciaEdgeIndices}
               activeTool={activeTool}
               hoverEdgeId={hoverEdgeId}
               activeEdgeId={activeEdgeId}
@@ -1197,117 +1519,61 @@ export function DeckCanvas({
       )}
 
 
-      <div
-        style={{
-          position: "absolute",
-          left: 16,
-          top: 16,
-          display: "flex",
-          gap: 8,
-          background: "rgba(255,255,255,0.92)",
-          padding: "8px 10px",
-          borderRadius: 10,
-          boxShadow: "0 4px 12px rgba(0,0,0,0.08)",
-          pointerEvents: "auto",
-          zIndex: 2,
-        }}
-      >
-        <button
-          type="button"
-          onClick={() => {
-            setActiveTool((prev) => (prev === "add" ? null : "add"));
-            setHoverAddEdgeIndex(null);
-            setHoverAddPoint(null);
-          }}
-          style={{
-            minWidth: 72,
-            height: 28,
-            padding: "6px 10px",
-            borderRadius: 6,
-            border: activeTool === "add" ? "2px solid #2463ff" : "1px solid #ccc",
-            background: activeTool === "add" ? "#e6f0ff" : "#fff",
-            color: activeTool === "add" ? "#2463ff" : "#111",
-            fontSize: 12,
-            fontWeight: activeTool === "add" ? 600 : 400,
-            cursor: "pointer",
-          }}
-        >
-          추가
-        </button>
-        <button
-          type="button"
-          onClick={() => {
-            setActiveTool((prev) => (prev === "delete" ? null : "delete"));
-            setHoverAddEdgeIndex(null);
-            setHoverAddPoint(null);
-          }}
-          style={{
-            minWidth: 72,
-            height: 28,
-            padding: "6px 10px",
-            borderRadius: 6,
-            border: activeTool === "delete" ? "2px solid #c52222" : "1px solid #ccc",
-            background: activeTool === "delete" ? "#ffe6e6" : "#fff",
-            color: "#c52222",
-            fontSize: 12,
-            fontWeight: activeTool === "delete" ? 600 : 400,
-            cursor: "pointer",
-          }}
-        >
-          삭제
-        </button>
-
-        <button
-          type="button"
-          onClick={() => {
-            setActiveTool((prev) => (prev === "wall" ? null : "wall"));
-            setHoverAddEdgeIndex(null);
-            setHoverAddPoint(null);
-          }}
-          style={{
-            minWidth: 72,
-            height: 28,
-            padding: "6px 10px",
-            borderRadius: 6,
-            border: activeTool === "wall" ? "2px solid #444" : "1px solid #ccc",
-            background: activeTool === "wall" ? "#eee" : "#fff",
-            color: "#111",
-            fontSize: 12,
-            fontWeight: activeTool === "wall" ? 700 : 400,
-            cursor: "pointer",
-          }}
-          title="벽체(ledger)로 고정할 변을 클릭해서 선택/해제"
-        >
-          벽체
-        </button>
-
-        <button
-          type="button"
-          onClick={() => {
-            const nextEnabled = activeTool !== "cutout";
-            setActiveTool(nextEnabled ? "cutout" : null);
-            setHoverAddEdgeIndex(null);
-            setHoverAddPoint(null);
-            setDraftCutoutPoints(null);
-            onChangeCutoutMode?.({ enabled: nextEnabled, shape: cutoutShape });
-          }}
-          style={{
-            minWidth: 72,
-            height: 28,
-            padding: "6px 10px",
-            borderRadius: 6,
-            border: activeTool === "cutout" ? "2px solid #ff6b6b" : "1px solid #ccc",
-            background: activeTool === "cutout" ? "#fff1f1" : "#fff",
-            color: activeTool === "cutout" ? "#ff6b6b" : "#111",
-            fontSize: 12,
-            fontWeight: activeTool === "cutout" ? 800 : 500,
-            cursor: "pointer",
-          }}
-          title="컷아웃 추가 모드(사각형/원형)는 왼쪽 패널에서 선택"
-        >
-          컷아웃
-        </button>
-      </div>
+      <CanvasControlsTopLeft
+        controls={[
+          {
+            key: "add",
+            label: "추가",
+            onClick: () => {
+              setActiveTool((prev) => (prev === "add" ? null : "add"));
+              setHoverAddEdgeIndex(null);
+              setHoverAddPoint(null);
+            },
+            active: activeTool === "add",
+            activeColor: "#2463ff",
+            activeBg: "#e6f0ff",
+          },
+          {
+            key: "delete",
+            label: "삭제",
+            onClick: () => {
+              setActiveTool((prev) => (prev === "delete" ? null : "delete"));
+              setHoverAddEdgeIndex(null);
+              setHoverAddPoint(null);
+            },
+            active: activeTool === "delete",
+            activeColor: "#c52222",
+            activeBg: "#ffe6e6",
+          },
+          {
+            key: "wall",
+            label: "벽체",
+            onClick: () => {
+              setActiveTool((prev) => (prev === "wall" ? null : "wall"));
+              setHoverAddEdgeIndex(null);
+              setHoverAddPoint(null);
+            },
+            active: activeTool === "wall",
+            activeColor: "#444",
+            activeBg: "#eee",
+          },
+          {
+            key: "cutout",
+            label: "컷아웃",
+            onClick: () => {
+              const nextEnabled = activeTool !== "cutout";
+              setActiveTool(nextEnabled ? "cutout" : null);
+              setHoverAddEdgeIndex(null);
+              setHoverAddPoint(null);
+              setDraftCutoutPoints(null);
+              onChangeCutoutMode?.({ enabled: nextEnabled, shape: cutoutShape });
+            },
+            active: activeTool === "cutout",
+            activeColor: "#ff6b6b",
+            activeBg: "#fff1f1",
+          },
+        ]}
+      />
 
       {polygon.outer.length >= 3 && areaM2 > 0 && (
         <div
@@ -1332,143 +1598,35 @@ export function DeckCanvas({
         </div>
       )}
 
-      {/* Undo/Redo buttons - bottom left */}
-      <div
-        style={{
-          position: "absolute",
-          left: 16,
-          bottom: 16,
-          display: "flex",
-          gap: 8,
-          padding: "8px 10px",
-          background: "rgba(255,255,255,0.92)",
-          borderRadius: 10,
-          boxShadow: "0 4px 12px rgba(0,0,0,0.08)",
-          pointerEvents: "auto",
-          zIndex: 2,
-        }}
-      >
-        <button
-          type="button"
-          onClick={handleUndo}
-          disabled={!canUndo}
-          title="실행 취소 (Ctrl+Z)"
-          style={{
-            minWidth: 72,
-            height: 28,
-            padding: "6px 10px",
-            borderRadius: 6,
-            border: "1px solid #ccc",
-            background: canUndo ? "#fff" : "#f5f5f5",
-            color: canUndo ? "#111" : "#999",
-            fontSize: 12,
-            fontWeight: 400,
-            cursor: canUndo ? "pointer" : "not-allowed",
-          }}
-        >
-          실행취소
-        </button>
-        <button
-          type="button"
-          onClick={handleRedo}
-          disabled={!canRedo}
-          title="다시 실행 (Ctrl+Shift+Z)"
-          style={{
-            minWidth: 72,
-            height: 28,
-            padding: "6px 10px",
-            borderRadius: 6,
-            border: "1px solid #ccc",
-            background: canRedo ? "#fff" : "#f5f5f5",
-            color: canRedo ? "#111" : "#999",
-            fontSize: 12,
-            fontWeight: 400,
-            cursor: canRedo ? "pointer" : "not-allowed",
-          }}
-        >
-          다시실행
-        </button>
-      </div>
+      <CanvasControlsBottomLeft
+        controls={[
+          {
+            key: "undo",
+            label: "실행취소",
+            onClick: handleUndo,
+            disabled: !canUndo,
+          },
+          {
+            key: "redo",
+            label: "다시실행",
+            onClick: handleRedo,
+            disabled: !canRedo,
+          },
+        ]}
+      />
 
-      {/* View mode toggle - bottom right */}
-      <div
-        style={{
-          position: "absolute",
-          right: 16,
-          bottom: 16,
-          display: "flex",
-          gap: 8,
-          padding: "8px 10px",
-          background: "rgba(255,255,255,0.92)",
-          borderRadius: 10,
-          boxShadow: "0 4px 12px rgba(0,0,0,0.08)",
-          pointerEvents: "auto",
-          zIndex: 2,
-        }}
-      >
-        <button
-          type="button"
-          onClick={onToggleViewMode}
-          disabled={!onToggleViewMode}
-          style={{
-            minWidth: 92,
-            height: 28,
-            padding: "6px 10px",
-            borderRadius: 6,
-            border: "1px solid #ccc",
-            background: onToggleViewMode ? "#fff" : "#f5f5f5",
-            color: "#333",
-            fontSize: 12,
-            fontWeight: 600,
-            cursor: onToggleViewMode ? "pointer" : "not-allowed",
-          }}
-          title="상판/하부 구조 보기 전환"
-        >
-          {viewMode === "deck" ? "하부 보기" : "상판 보기"}
-        </button>
-      </div>
+      <CanvasControlsBottomRight
+        controls={[
+          {
+            key: "view-mode-toggle",
+            label: viewMode === "deck" ? "하부 보기" : "상판 보기",
+            onClick: onToggleViewMode || (() => {}),
+            disabled: !onToggleViewMode,
+          },
+        ]}
+      />
 
-      <div
-        style={{
-          position: "absolute",
-          left: "50%",
-          bottom: 16,
-          transform: "translateX(-50%)",
-          display: "flex",
-          gap: 8,
-          flexWrap: "nowrap",
-          justifyContent: "center",
-          padding: "8px 10px",
-          background: "rgba(255,255,255,0.9)",
-          borderRadius: 10,
-          boxShadow: "0 4px 12px rgba(0,0,0,0.08)",
-          pointerEvents: "auto",
-          maxWidth: "calc(100% - 24px)",
-          overflowX: "auto",
-          zIndex: 2,
-        }}
-      >
-        {controls.map((control) => (
-          <button
-            key={control.key}
-            onClick={control.onClick}
-            style={{
-              minWidth: 82,
-              height: 27,
-              padding: "6px 10px",
-              borderRadius: 6,
-              border: "1px solid #ccc",
-              background: "#fff",
-              color: "#333",
-              fontSize: 12,
-              cursor: "pointer",
-              boxShadow: "inset 0 1px 0 rgba(255,255,255,0.4)",
-            }}
-          >
-            {control.label}
-          </button>
-        ))}
-      </div>
+      <CanvasControlsCenter controls={controls} />
     </div>
   );
 }
