@@ -1,5 +1,7 @@
-import { useCallback, useRef, useState, memo } from "react";
-import { EDGE_LENGTH_STEP_MM, MIN_EDGE_SPAN_MM } from "../geometry/edges";
+import { useCallback, useState, memo } from "react";
+import { EDGE_LENGTH_STEP_MM, MIN_EDGE_SPAN_MM, type EdgeInfo } from "../geometry/edges";
+import type { CutoutShape } from "../types";
+import type { FoundationType, SubstructureConfig } from "@deck/core";
 
 // Toggle Switch Component - extracted outside to prevent recreation on each render
 const ToggleSwitch = memo(function ToggleSwitch({
@@ -14,7 +16,13 @@ const ToggleSwitch = memo(function ToggleSwitch({
   return (
     <div
       onClick={() => onChange(!checked)}
-      style={{ display: "flex", gap: 8, alignItems: "center", justifyContent: "space-between", cursor: "pointer" }}
+      style={{
+        display: "flex",
+        gap: 8,
+        alignItems: "center",
+        justifyContent: "space-between",
+        cursor: "pointer",
+      }}
     >
       <span style={{ fontSize: 13 }}>{label}</span>
       <div
@@ -57,8 +65,6 @@ type DimensionItem = {
   endIndex: number;
 };
 
-import { type CutoutShape } from "../types";
-
 type StairConfig = {
   id: string;
   sideIndex: number;
@@ -97,6 +103,9 @@ export function ControlsPanel({
   fasciaEdgeIndices,
   onChangeFasciaEdgeIndices,
   allEdges,
+  substructureConfig,
+  onChangeSubstructureConfig,
+  deckThicknessMm,
 }: {
   shapeOptions: ShapeOption[];
   selectedShapeId: string;
@@ -107,7 +116,10 @@ export function ControlsPanel({
   showResults: boolean;
   substructureAuto?: { primaryLenM: number; secondaryLenM: number };
   substructureOverridesMm?: { primaryLenMm?: number; secondaryLenMm?: number };
-  onChangeSubstructureOverridesMm?: (next: { primaryLenMm?: number; secondaryLenMm?: number }) => void;
+  onChangeSubstructureOverridesMm?: (next: {
+    primaryLenMm?: number;
+    secondaryLenMm?: number;
+  }) => void;
   stairs?: {
     enabled: boolean;
     items: StairConfig[];
@@ -119,20 +131,38 @@ export function ControlsPanel({
     stringerMaterialOverrides?: { thicknessMm?: number; widthMm?: number; stockLengthMm?: number };
   }) => void;
   cutouts?: { xMm: number; yMm: number }[][];
-  cutoutsMeta?: { shape: CutoutShape; xMm: number; yMm: number; widthMm: number; heightMm: number }[];
+  cutoutsMeta?: {
+    shape: CutoutShape;
+    xMm: number;
+    yMm: number;
+    widthMm: number;
+    heightMm: number;
+  }[];
   onAddCutout?: () => void;
   onDeleteCutout?: (index: number) => void;
   onChangeCutout?: (
     index: number,
-    next: { shape: CutoutShape; xMm: number; yMm: number; widthMm: number; heightMm: number }
+    next: { shape: CutoutShape; xMm: number; yMm: number; widthMm: number; heightMm: number },
   ) => void;
   attachedEdgeIndices?: number[];
   onChangeAttachedEdgeIndices?: (indices: number[]) => void;
   fasciaEdgeIndices?: number[];
   onChangeFasciaEdgeIndices?: (indices: number[]) => void;
-  allEdges?: DimensionItem[];
+  allEdges?: EdgeInfo[];
+  substructureConfig?: SubstructureConfig;
+  onChangeSubstructureConfig?: (config: SubstructureConfig) => void;
+  deckThicknessMm?: number;
 }) {
-  const sectionIds = ["floor", "cutout", "steps", "sides", "decking", "edging", "laying", "substructure"] as const;
+  const sectionIds = [
+    "floor",
+    "cutout",
+    "steps",
+    "sides",
+    "decking",
+    "edging",
+    "laying",
+    "substructure",
+  ] as const;
   const [openMap, setOpenMap] = useState<Record<string, boolean>>(() => {
     const initial: Record<string, boolean> = {};
     for (const id of sectionIds) initial[id] = id === "floor";
@@ -157,17 +187,14 @@ export function ControlsPanel({
     width: "",
     length: "",
   });
+  // Applied decking spec (shown after clicking apply button)
+  const [appliedDeckingSpec, setAppliedDeckingSpec] = useState<{
+    thicknessMm: number;
+    widthMm: number;
+    lengthMm: number;
+  } | null>(null);
 
-  // Track previous cutouts length to auto-open new cutouts
-  const prevCutoutsLengthRef = useRef(cutouts?.length ?? 0);
   const currentCutoutsLength = cutouts?.length ?? 0;
-  if (currentCutoutsLength > prevCutoutsLengthRef.current) {
-    // New cutout added - open it
-    setCutoutOpenMap({ [currentCutoutsLength - 1]: true });
-  } else if (currentCutoutsLength === 0 && prevCutoutsLengthRef.current > 0) {
-    setCutoutOpenMap({});
-  }
-  prevCutoutsLengthRef.current = currentCutoutsLength;
 
   const quickSummary = (text: string) => (
     <p style={{ fontSize: 13, color: "#555", margin: 0 }}>{text}</p>
@@ -175,7 +202,7 @@ export function ControlsPanel({
 
   const formatLength = useCallback(
     (lengthMm: number) => Math.round(lengthMm).toLocaleString("ko-KR"),
-    []
+    [],
   );
 
   // Helper to get input value - returns editing value if being edited, otherwise derived from props
@@ -183,7 +210,7 @@ export function ControlsPanel({
     (key: string, defaultValue: string) => {
       return editingInputs[key] !== undefined ? editingInputs[key] : defaultValue;
     },
-    [editingInputs]
+    [editingInputs],
   );
 
   // Helper to start editing an input
@@ -204,6 +231,11 @@ export function ControlsPanel({
     setOpenMap((prev) => ({ ...prev, [id]: !prev[id] }));
   };
 
+  const updateSubConfig = (updates: Partial<SubstructureConfig>) => {
+    if (!substructureConfig || !onChangeSubstructureConfig) return;
+    onChangeSubstructureConfig({ ...substructureConfig, ...updates });
+  };
+
   const floorPlanContent = (
     <>
       <div className="shape-grid">
@@ -221,56 +253,61 @@ export function ControlsPanel({
 
       <div style={{ marginTop: 16 }}>
         <>
-            <div style={{ fontWeight: 600, marginBottom: 8 }}>변 길이</div>
-            {dimensions.length > 0 ? (
-              <div className="dimension-list">
-                {dimensions.map((item) => {
-                  const inputKey = `dim-${item.id}`;
-                  const displayValue = getInputValue(inputKey, formatLength(item.lengthMm));
-                  return (
-                    <div key={item.id} className="dimension-item">
-                      <span>{item.label}</span>
-                      <div className="dimension-input-row">
-                        <input
-                          type="text"
-                          inputMode="decimal"
-                          value={displayValue}
-                          onChange={(e) => startEditing(inputKey, e.target.value)}
-                          onFocus={(e) => {
-                            startEditing(inputKey, formatLength(item.lengthMm));
-                            e.currentTarget.select();
-                          }}
-                          onBlur={() => {
-                            const raw = (editingInputs[inputKey] ?? "").trim();
-                            const parsed = Number(raw.replace(/,/g, ""));
-                            const snapped = Math.round(parsed / EDGE_LENGTH_STEP_MM) * EDGE_LENGTH_STEP_MM;
-                            if (!Number.isFinite(parsed) || snapped <= 0 || snapped < MIN_EDGE_SPAN_MM) {
-                              finishEditing(inputKey);
-                              return;
-                            }
-                            onChangeDimensionLength(item.id, snapped);
+          <div style={{ fontWeight: 600, marginBottom: 8 }}>변 길이</div>
+          {dimensions.length > 0 ? (
+            <div className="dimension-list">
+              {dimensions.map((item) => {
+                const inputKey = `dim-${item.id}`;
+                const displayValue = getInputValue(inputKey, formatLength(item.lengthMm));
+                return (
+                  <div key={item.id} className="dimension-item">
+                    <span>{item.label}</span>
+                    <div className="dimension-input-row">
+                      <input
+                        type="text"
+                        inputMode="decimal"
+                        value={displayValue}
+                        onChange={(e) => startEditing(inputKey, e.target.value)}
+                        onFocus={(e) => {
+                          startEditing(inputKey, formatLength(item.lengthMm));
+                          e.currentTarget.select();
+                        }}
+                        onBlur={() => {
+                          const raw = (editingInputs[inputKey] ?? "").trim();
+                          const parsed = Number(raw.replace(/,/g, ""));
+                          const snapped =
+                            Math.round(parsed / EDGE_LENGTH_STEP_MM) * EDGE_LENGTH_STEP_MM;
+                          if (
+                            !Number.isFinite(parsed) ||
+                            snapped <= 0 ||
+                            snapped < MIN_EDGE_SPAN_MM
+                          ) {
                             finishEditing(inputKey);
-                          }}
-                          onKeyDown={(e) => {
-                            if (e.key === "Enter") {
-                              e.currentTarget.blur();
-                            } else if (e.key === "Escape") {
-                              finishEditing(inputKey);
-                              e.currentTarget.blur();
-                            }
-                          }}
-                          className="dimension-input"
-                        />
-                        <span className="dimension-unit">mm</span>
-                      </div>
+                            return;
+                          }
+                          onChangeDimensionLength(item.id, snapped);
+                          finishEditing(inputKey);
+                        }}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter") {
+                            e.currentTarget.blur();
+                          } else if (e.key === "Escape") {
+                            finishEditing(inputKey);
+                            e.currentTarget.blur();
+                          }
+                        }}
+                        className="dimension-input"
+                      />
+                      <span className="dimension-unit">mm</span>
                     </div>
-                  );
-                })}
-              </div>
-            ) : (
-              <div style={{ fontSize: 12, color: "#777" }}>변 정보를 찾을 수 없습니다.</div>
-            )}
-          </>
+                  </div>
+                );
+              })}
+            </div>
+          ) : (
+            <div style={{ fontSize: 12, color: "#777" }}>변 정보를 찾을 수 없습니다.</div>
+          )}
+        </>
       </div>
     </>
   );
@@ -283,7 +320,10 @@ export function ControlsPanel({
         type="button"
         className="controls-action-button"
         onClick={() => {
+          const nextIndex = currentCutoutsLength;
           onAddCutout?.();
+          // setState-in-effect 규칙 준수를 위해 이벤트 핸들러에서만 자동 오픈 처리
+          setCutoutOpenMap({ [nextIndex]: true });
         }}
         style={{
           borderColor: "#ff6b6b",
@@ -306,7 +346,13 @@ export function ControlsPanel({
             const shape = meta?.shape ?? "rectangle";
 
             const update = (
-              partial: Partial<{ shape: CutoutShape; xMm: number; yMm: number; widthMm: number; heightMm: number }>
+              partial: Partial<{
+                shape: CutoutShape;
+                xMm: number;
+                yMm: number;
+                widthMm: number;
+                heightMm: number;
+              }>,
             ) => {
               if (!meta || !onChangeCutout) return;
               onChangeCutout(idx, { ...meta, ...partial });
@@ -316,7 +362,14 @@ export function ControlsPanel({
               const inputKey = `cutout-${idx}-${key}`;
               if (editingInputs[inputKey] !== undefined) return editingInputs[inputKey];
               if (!meta) return "";
-              const v = key === "x" ? meta.xMm : key === "y" ? meta.yMm : key === "w" ? meta.widthMm : meta.heightMm;
+              const v =
+                key === "x"
+                  ? meta.xMm
+                  : key === "y"
+                    ? meta.yMm
+                    : key === "w"
+                      ? meta.widthMm
+                      : meta.heightMm;
               return String(Math.round(v));
             };
 
@@ -432,7 +485,12 @@ export function ControlsPanel({
                             value={getFieldValue("x")}
                             onChange={(e) => onFieldChange("x", e.target.value)}
                             onBlur={() => commitNumber("x")}
-                            style={{ width: "100%", padding: "8px 10px", borderRadius: 8, border: "1px solid #ccc" }}
+                            style={{
+                              width: "100%",
+                              padding: "8px 10px",
+                              borderRadius: 8,
+                              border: "1px solid #ccc",
+                            }}
                           />
                         </div>
                         <div style={{ flex: 1 }}>
@@ -443,7 +501,12 @@ export function ControlsPanel({
                             value={getFieldValue("y")}
                             onChange={(e) => onFieldChange("y", e.target.value)}
                             onBlur={() => commitNumber("y")}
-                            style={{ width: "100%", padding: "8px 10px", borderRadius: 8, border: "1px solid #ccc" }}
+                            style={{
+                              width: "100%",
+                              padding: "8px 10px",
+                              borderRadius: 8,
+                              border: "1px solid #ccc",
+                            }}
                           />
                         </div>
                       </div>
@@ -453,35 +516,64 @@ export function ControlsPanel({
                       <div style={{ fontSize: 13, fontWeight: 700, color: "#333" }}>영역 치수</div>
                       <div style={{ display: "flex", gap: 10 }}>
                         <div style={{ flex: 1 }}>
-                          <div style={{ fontSize: 12, color: "#666", marginBottom: 4 }}>길이 (mm)</div>
+                          <div style={{ fontSize: 12, color: "#666", marginBottom: 4 }}>
+                            길이 (mm)
+                          </div>
                           <input
                             type="text"
                             inputMode="decimal"
                             value={getFieldValue("w")}
                             onChange={(e) => onFieldChange("w", e.target.value)}
                             onBlur={() => commitNumber("w")}
-                            style={{ width: "100%", padding: "8px 10px", borderRadius: 8, border: "1px solid #ccc" }}
+                            style={{
+                              width: "100%",
+                              padding: "8px 10px",
+                              borderRadius: 8,
+                              border: "1px solid #ccc",
+                            }}
                           />
                         </div>
                         <div style={{ flex: 1 }}>
-                          <div style={{ fontSize: 12, color: "#666", marginBottom: 4 }}>너비 (mm)</div>
+                          <div style={{ fontSize: 12, color: "#666", marginBottom: 4 }}>
+                            너비 (mm)
+                          </div>
                           <input
                             type="text"
                             inputMode="decimal"
                             value={getFieldValue("h")}
                             onChange={(e) => onFieldChange("h", e.target.value)}
                             onBlur={() => commitNumber("h")}
-                            style={{ width: "100%", padding: "8px 10px", borderRadius: 8, border: "1px solid #ccc" }}
+                            style={{
+                              width: "100%",
+                              padding: "8px 10px",
+                              borderRadius: 8,
+                              border: "1px solid #ccc",
+                            }}
                           />
                         </div>
                       </div>
                     </div>
 
-                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
+                    <div
+                      style={{
+                        display: "flex",
+                        justifyContent: "space-between",
+                        alignItems: "center",
+                        gap: 8,
+                      }}
+                    >
                       <div style={{ fontSize: 12, color: "#777" }}>점 {pts.length}개</div>
                       <button
                         type="button"
-                        onClick={() => onDeleteCutout?.(idx)}
+                        onClick={() => {
+                          onDeleteCutout?.(idx);
+                          // 삭제 후 선택 상태 정리(기본값: 모두 닫기)
+                          setCutoutOpenMap((prev) => {
+                            const next = { ...prev };
+                            delete next[idx];
+                            return next;
+                          });
+                        }}
                         style={{
                           padding: "8px 10px",
                           borderRadius: 8,
@@ -522,7 +614,7 @@ export function ControlsPanel({
             stepCount: 3,
             stepDepthMm: 300,
             stepHeightMm: 156,
-            closedRisers: false
+            closedRisers: false,
           };
           onChangeStairs({ ...stairs, items: [...(stairs.items ?? []), newItem] });
           // Open the new item
@@ -553,7 +645,9 @@ export function ControlsPanel({
 
             const updateItem = (partial: Partial<StairConfig>) => {
               if (!stairs || !onChangeStairs) return;
-              const nextItems = stairs.items.map((it) => (it.id === item.id ? { ...it, ...partial } : it));
+              const nextItems = stairs.items.map((it) =>
+                it.id === item.id ? { ...it, ...partial } : it,
+              );
               onChangeStairs({ ...stairs, items: nextItems });
             };
 
@@ -564,8 +658,14 @@ export function ControlsPanel({
               if (key === "width") return String(Math.round(item.widthMm));
               if (key === "depth") return String(Math.round(item.stepDepthMm));
               if (key === "height") return String(Math.round(item.stepHeightMm));
-              if (key === "pads") return item.foundation?.padsQty !== undefined ? String(item.foundation.padsQty) : "";
-              if (key === "piles") return item.foundation?.pilesQty !== undefined ? String(item.foundation.pilesQty) : "";
+              if (key === "pads")
+                return item.foundation?.padsQty !== undefined
+                  ? String(item.foundation.padsQty)
+                  : "";
+              if (key === "piles")
+                return item.foundation?.pilesQty !== undefined
+                  ? String(item.foundation.pilesQty)
+                  : "";
               return "";
             };
 
@@ -602,7 +702,13 @@ export function ControlsPanel({
                   overflow: "hidden",
                 }}
               >
-                <div style={{ display: "flex", alignItems: "center", borderBottom: isOpen ? "1px solid #eee" : "none" }}>
+                <div
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    borderBottom: isOpen ? "1px solid #eee" : "none",
+                  }}
+                >
                   <button
                     type="button"
                     onClick={() => setStairOpenMap((p) => ({ ...p, [item.id]: !p[item.id] }))}
@@ -617,7 +723,7 @@ export function ControlsPanel({
                       cursor: "pointer",
                       fontWeight: 700,
                       color: "#333",
-                      textAlign: "left"
+                      textAlign: "left",
                     }}
                   >
                     <span>계단 {index + 1}</span>
@@ -646,7 +752,13 @@ export function ControlsPanel({
 
                 {isOpen && (
                   <div style={{ padding: 12, display: "grid", gap: 10 }}>
-                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                    <div
+                      style={{
+                        display: "flex",
+                        justifyContent: "space-between",
+                        alignItems: "center",
+                      }}
+                    >
                       <span style={{ fontSize: 13, color: "#555" }}>설치 변</span>
                       <select
                         value={item.sideIndex}
@@ -654,12 +766,20 @@ export function ControlsPanel({
                         style={{ padding: "4px 8px", borderRadius: 6, borderColor: "#ccc" }}
                       >
                         {(allEdges || dimensions).map((dim) => (
-                          <option key={dim.id} value={dim.startIndex}>{dim.label}</option>
+                          <option key={dim.id} value={dim.startIndex}>
+                            {dim.label}
+                          </option>
                         ))}
                       </select>
                     </div>
 
-                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                    <div
+                      style={{
+                        display: "flex",
+                        justifyContent: "space-between",
+                        alignItems: "center",
+                      }}
+                    >
                       <span style={{ fontSize: 13, color: "#555" }}>시작 위치(mm)</span>
                       <input
                         type="text"
@@ -667,11 +787,22 @@ export function ControlsPanel({
                         value={getStairField("start")}
                         onChange={(e) => setStairField("start", e.target.value)}
                         onBlur={() => commitField("start")}
-                        style={{ width: 100, padding: "6px 8px", borderRadius: 6, border: "1px solid #ccc" }}
+                        style={{
+                          width: 100,
+                          padding: "6px 8px",
+                          borderRadius: 6,
+                          border: "1px solid #ccc",
+                        }}
                       />
                     </div>
 
-                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                    <div
+                      style={{
+                        display: "flex",
+                        justifyContent: "space-between",
+                        alignItems: "center",
+                      }}
+                    >
                       <span style={{ fontSize: 13, color: "#555" }}>계단 폭(mm)</span>
                       <input
                         type="text"
@@ -679,24 +810,53 @@ export function ControlsPanel({
                         value={getStairField("width")}
                         onChange={(e) => setStairField("width", e.target.value)}
                         onBlur={() => commitField("width")}
-                        style={{ width: 100, padding: "6px 8px", borderRadius: 6, border: "1px solid #ccc" }}
+                        style={{
+                          width: 100,
+                          padding: "6px 8px",
+                          borderRadius: 6,
+                          border: "1px solid #ccc",
+                        }}
                       />
                     </div>
 
-                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                    <div
+                      style={{
+                        display: "flex",
+                        justifyContent: "space-between",
+                        alignItems: "center",
+                      }}
+                    >
                       <span style={{ fontSize: 13, color: "#555" }}>단 수</span>
                       <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                         <button
                           type="button"
                           onClick={() => updateItem({ stepCount: Math.max(1, item.stepCount - 1) })}
-                          style={{ width: 28, height: 28, borderRadius: 4, border: "1px solid #ccc", background: "#f0f0f0" }}
-                        >−</button>
+                          style={{
+                            width: 28,
+                            height: 28,
+                            borderRadius: 4,
+                            border: "1px solid #ccc",
+                            background: "#f0f0f0",
+                          }}
+                        >
+                          −
+                        </button>
                         <span style={{ fontWeight: 700 }}>{item.stepCount}</span>
                         <button
                           type="button"
-                          onClick={() => updateItem({ stepCount: Math.min(30, item.stepCount + 1) })}
-                          style={{ width: 28, height: 28, borderRadius: 4, border: "1px solid #ccc", background: "#f0f0f0" }}
-                        >+</button>
+                          onClick={() =>
+                            updateItem({ stepCount: Math.min(30, item.stepCount + 1) })
+                          }
+                          style={{
+                            width: 28,
+                            height: 28,
+                            borderRadius: 4,
+                            border: "1px solid #ccc",
+                            background: "#f0f0f0",
+                          }}
+                        >
+                          +
+                        </button>
                       </div>
                     </div>
 
@@ -704,25 +864,39 @@ export function ControlsPanel({
 
                     <div style={{ display: "flex", gap: 10 }}>
                       <div style={{ flex: 1 }}>
-                        <div style={{ fontSize: 12, color: "#666", marginBottom: 4 }}>깊이 (mm)</div>
+                        <div style={{ fontSize: 12, color: "#666", marginBottom: 4 }}>
+                          깊이 (mm)
+                        </div>
                         <input
                           type="text"
                           inputMode="decimal"
                           value={getStairField("depth")}
                           onChange={(e) => setStairField("depth", e.target.value)}
                           onBlur={() => commitField("depth")}
-                          style={{ width: "100%", padding: "6px 8px", borderRadius: 6, border: "1px solid #ccc" }}
+                          style={{
+                            width: "100%",
+                            padding: "6px 8px",
+                            borderRadius: 6,
+                            border: "1px solid #ccc",
+                          }}
                         />
                       </div>
                       <div style={{ flex: 1 }}>
-                        <div style={{ fontSize: 12, color: "#666", marginBottom: 4 }}>높이 (mm)</div>
+                        <div style={{ fontSize: 12, color: "#666", marginBottom: 4 }}>
+                          높이 (mm)
+                        </div>
                         <input
                           type="text"
                           inputMode="decimal"
                           value={getStairField("height")}
                           onChange={(e) => setStairField("height", e.target.value)}
                           onBlur={() => commitField("height")}
-                          style={{ width: "100%", padding: "6px 8px", borderRadius: 6, border: "1px solid #ccc" }}
+                          style={{
+                            width: "100%",
+                            padding: "6px 8px",
+                            borderRadius: 6,
+                            border: "1px solid #ccc",
+                          }}
                         />
                       </div>
                     </div>
@@ -740,7 +914,9 @@ export function ControlsPanel({
 
                     <div style={{ display: "flex", gap: 10 }}>
                       <div style={{ flex: 1 }}>
-                        <div style={{ fontSize: 12, color: "#666", marginBottom: 4 }}>패드 수량</div>
+                        <div style={{ fontSize: 12, color: "#666", marginBottom: 4 }}>
+                          패드 수량
+                        </div>
                         <input
                           type="text"
                           inputMode="decimal"
@@ -751,18 +927,29 @@ export function ControlsPanel({
                             const raw = editingInputs[inputKey] ?? "";
                             const val = Number(raw.replace(/,/g, ""));
                             if (raw === "" || !Number.isFinite(val) || val < 0) {
-                              updateItem({ foundation: { ...item.foundation, padsQty: undefined } });
+                              updateItem({
+                                foundation: { ...item.foundation, padsQty: undefined },
+                              });
                             } else {
-                              updateItem({ foundation: { ...item.foundation, padsQty: Math.floor(val) } });
+                              updateItem({
+                                foundation: { ...item.foundation, padsQty: Math.floor(val) },
+                              });
                             }
                             finishEditing(inputKey);
                           }}
                           placeholder="0"
-                          style={{ width: "100%", padding: "6px 8px", borderRadius: 6, border: "1px solid #ccc" }}
+                          style={{
+                            width: "100%",
+                            padding: "6px 8px",
+                            borderRadius: 6,
+                            border: "1px solid #ccc",
+                          }}
                         />
                       </div>
                       <div style={{ flex: 1 }}>
-                        <div style={{ fontSize: 12, color: "#666", marginBottom: 4 }}>파일 수량</div>
+                        <div style={{ fontSize: 12, color: "#666", marginBottom: 4 }}>
+                          파일 수량
+                        </div>
                         <input
                           type="text"
                           inputMode="decimal"
@@ -773,20 +960,38 @@ export function ControlsPanel({
                             const raw = editingInputs[inputKey] ?? "";
                             const val = Number(raw.replace(/,/g, ""));
                             if (raw === "" || !Number.isFinite(val) || val < 0) {
-                              updateItem({ foundation: { ...item.foundation, pilesQty: undefined } });
+                              updateItem({
+                                foundation: { ...item.foundation, pilesQty: undefined },
+                              });
                             } else {
-                              updateItem({ foundation: { ...item.foundation, pilesQty: Math.floor(val) } });
+                              updateItem({
+                                foundation: { ...item.foundation, pilesQty: Math.floor(val) },
+                              });
                             }
                             finishEditing(inputKey);
                           }}
                           placeholder="0"
-                          style={{ width: "100%", padding: "6px 8px", borderRadius: 6, border: "1px solid #ccc" }}
+                          style={{
+                            width: "100%",
+                            padding: "6px 8px",
+                            borderRadius: 6,
+                            border: "1px solid #ccc",
+                          }}
                         />
                       </div>
                     </div>
 
-                    <div style={{ fontSize: 12, color: "#888", background: "#f9f9f9", padding: 8, borderRadius: 6 }}>
-                      전체 치수: {Math.round(item.widthMm)} x {Math.round(totalD)} x {Math.round(totalH)} mm
+                    <div
+                      style={{
+                        fontSize: 12,
+                        color: "#888",
+                        background: "#f9f9f9",
+                        padding: 8,
+                        borderRadius: 6,
+                      }}
+                    >
+                      전체 치수: {Math.round(item.widthMm)} x {Math.round(totalD)} x{" "}
+                      {Math.round(totalH)} mm
                     </div>
                   </div>
                 )}
@@ -798,15 +1003,29 @@ export function ControlsPanel({
 
       {stairs?.enabled && (
         <div style={{ borderTop: "1px solid #eee", paddingTop: 12, marginTop: 4 }}>
-          <div style={{ fontWeight: 700, color: "#333", marginBottom: 8 }}>측판(스트링거) 자재 공통 설정</div>
+          <div style={{ fontWeight: 700, color: "#333", marginBottom: 8 }}>
+            측판(스트링거) 자재 공통 설정
+          </div>
           <div style={{ display: "grid", gap: 8 }}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "center",
+                gap: 8,
+              }}
+            >
               <span style={{ fontSize: 13, color: "#555" }}>두께(mm)</span>
               <input
                 type="text"
                 inputMode="decimal"
                 placeholder="자동"
-                value={getInputValue("str-thk", stairs.stringerMaterialOverrides?.thicknessMm ? String(Math.round(stairs.stringerMaterialOverrides.thicknessMm)) : "")}
+                value={getInputValue(
+                  "str-thk",
+                  stairs.stringerMaterialOverrides?.thicknessMm
+                    ? String(Math.round(stairs.stringerMaterialOverrides.thicknessMm))
+                    : "",
+                )}
                 onChange={(e) => startEditing("str-thk", e.target.value)}
                 onBlur={() => {
                   if (!onChangeStairs) return;
@@ -815,21 +1034,38 @@ export function ControlsPanel({
                     ...stairs,
                     stringerMaterialOverrides: {
                       ...stairs.stringerMaterialOverrides,
-                      thicknessMm: (val > 0) ? val : undefined
-                    }
+                      thicknessMm: val > 0 ? val : undefined,
+                    },
                   });
                   finishEditing("str-thk");
                 }}
-                style={{ width: 100, padding: "6px 8px", borderRadius: 6, border: "1px solid #ccc" }}
+                style={{
+                  width: 100,
+                  padding: "6px 8px",
+                  borderRadius: 6,
+                  border: "1px solid #ccc",
+                }}
               />
             </div>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "center",
+                gap: 8,
+              }}
+            >
               <span style={{ fontSize: 13, color: "#555" }}>폭(mm)</span>
               <input
                 type="text"
                 inputMode="decimal"
                 placeholder="자동"
-                value={getInputValue("str-wid", stairs.stringerMaterialOverrides?.widthMm ? String(Math.round(stairs.stringerMaterialOverrides.widthMm)) : "")}
+                value={getInputValue(
+                  "str-wid",
+                  stairs.stringerMaterialOverrides?.widthMm
+                    ? String(Math.round(stairs.stringerMaterialOverrides.widthMm))
+                    : "",
+                )}
                 onChange={(e) => startEditing("str-wid", e.target.value)}
                 onBlur={() => {
                   if (!onChangeStairs) return;
@@ -838,21 +1074,38 @@ export function ControlsPanel({
                     ...stairs,
                     stringerMaterialOverrides: {
                       ...stairs.stringerMaterialOverrides,
-                      widthMm: (val > 0) ? val : undefined
-                    }
+                      widthMm: val > 0 ? val : undefined,
+                    },
                   });
                   finishEditing("str-wid");
                 }}
-                style={{ width: 100, padding: "6px 8px", borderRadius: 6, border: "1px solid #ccc" }}
+                style={{
+                  width: 100,
+                  padding: "6px 8px",
+                  borderRadius: 6,
+                  border: "1px solid #ccc",
+                }}
               />
             </div>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "center",
+                gap: 8,
+              }}
+            >
               <span style={{ fontSize: 13, color: "#555" }}>길이(mm)</span>
               <input
                 type="text"
                 inputMode="decimal"
                 placeholder="자동"
-                value={getInputValue("str-len", stairs.stringerMaterialOverrides?.stockLengthMm ? String(Math.round(stairs.stringerMaterialOverrides.stockLengthMm)) : "")}
+                value={getInputValue(
+                  "str-len",
+                  stairs.stringerMaterialOverrides?.stockLengthMm
+                    ? String(Math.round(stairs.stringerMaterialOverrides.stockLengthMm))
+                    : "",
+                )}
                 onChange={(e) => startEditing("str-len", e.target.value)}
                 onBlur={() => {
                   if (!onChangeStairs) return;
@@ -861,12 +1114,17 @@ export function ControlsPanel({
                     ...stairs,
                     stringerMaterialOverrides: {
                       ...stairs.stringerMaterialOverrides,
-                      stockLengthMm: (val > 0) ? val : undefined
-                    }
+                      stockLengthMm: val > 0 ? val : undefined,
+                    },
                   });
                   finishEditing("str-len");
                 }}
-                style={{ width: 100, padding: "6px 8px", borderRadius: 6, border: "1px solid #ccc" }}
+                style={{
+                  width: 100,
+                  padding: "6px 8px",
+                  borderRadius: 6,
+                  border: "1px solid #ccc",
+                }}
               />
             </div>
             <button
@@ -883,7 +1141,7 @@ export function ControlsPanel({
                 background: "#fff",
                 cursor: "pointer",
                 fontWeight: 700,
-                fontSize: 13
+                fontSize: 13,
               }}
             >
               초기화
@@ -894,11 +1152,22 @@ export function ControlsPanel({
     </div>
   );
 
-  const edgesForSides = (allEdges && allEdges.length > 0) ? allEdges : dimensions;
+  const edgesForSides = allEdges && allEdges.length > 0 ? allEdges : dimensions;
   const hasEdges = edgesForSides.length > 0;
 
   // DEBUG
-  console.log('[DEBUG ControlsPanel] allEdges:', allEdges?.length, 'dimensions:', dimensions.length, 'edgesForSides:', edgesForSides.length, 'hasEdges:', hasEdges, 'attachedEdgeIndices:', attachedEdgeIndices);
+  console.log(
+    "[DEBUG ControlsPanel] allEdges:",
+    allEdges?.length,
+    "dimensions:",
+    dimensions.length,
+    "edgesForSides:",
+    edgesForSides.length,
+    "hasEdges:",
+    hasEdges,
+    "attachedEdgeIndices:",
+    attachedEdgeIndices,
+  );
 
   const sidesContent = (
     <div style={{ display: "grid", gap: 12 }}>
@@ -920,21 +1189,30 @@ export function ControlsPanel({
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
               {edgesForSides.map((dim) => {
                 const isAttached = (attachedEdgeIndices ?? []).includes(dim.startIndex);
-                // allEdges uses fromLabel/toLabel, dimensions uses label
-                const edgeLabel = 'fromLabel' in dim ? `${dim.fromLabel}–${dim.toLabel}` : dim.label;
+                const edgeLabel = dim.label;
                 return (
                   <ToggleSwitch
                     key={dim.id}
                     label={edgeLabel}
                     checked={isAttached}
                     onChange={(checked) => {
-                      console.log('[DEBUG Toggle] Attached onChange called:', edgeLabel, 'checked:', checked, 'onChangeAttachedEdgeIndices:', !!onChangeAttachedEdgeIndices);
+                      console.log(
+                        "[DEBUG Toggle] Attached onChange called:",
+                        edgeLabel,
+                        "checked:",
+                        checked,
+                        "onChangeAttachedEdgeIndices:",
+                        !!onChangeAttachedEdgeIndices,
+                      );
                       if (!onChangeAttachedEdgeIndices) return;
                       const current = new Set(attachedEdgeIndices ?? []);
                       if (checked) current.add(dim.startIndex);
                       else current.delete(dim.startIndex);
                       const newIndices = Array.from(current).sort((a, b) => a - b);
-                      console.log('[DEBUG Toggle] Calling onChangeAttachedEdgeIndices with:', newIndices);
+                      console.log(
+                        "[DEBUG Toggle] Calling onChangeAttachedEdgeIndices with:",
+                        newIndices,
+                      );
                       onChangeAttachedEdgeIndices(newIndices);
                     }}
                   />
@@ -955,8 +1233,7 @@ export function ControlsPanel({
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
               {edgesForSides.map((dim) => {
                 const hasFascia = (fasciaEdgeIndices ?? []).includes(dim.startIndex);
-                // allEdges uses fromLabel/toLabel, dimensions uses label
-                const edgeLabel = 'fromLabel' in dim ? `${dim.fromLabel}–${dim.toLabel}` : dim.label;
+                const edgeLabel = dim.label;
                 return (
                   <ToggleSwitch
                     key={dim.id}
@@ -982,7 +1259,10 @@ export function ControlsPanel({
   const getSubValue = (key: "primary" | "secondary") => {
     const inputKey = `sub-${key}`;
     if (editingInputs[inputKey] !== undefined) return editingInputs[inputKey];
-    const val = key === "primary" ? substructureOverridesMm?.primaryLenMm : substructureOverridesMm?.secondaryLenMm;
+    const val =
+      key === "primary"
+        ? substructureOverridesMm?.primaryLenMm
+        : substructureOverridesMm?.secondaryLenMm;
     return val !== undefined ? String(Math.round(val)) : "";
   };
 
@@ -1014,9 +1294,13 @@ export function ControlsPanel({
       id: "decking",
       title: "데크재",
       content: (() => {
-        const isThicknessCustom = ![19, 20, 25].includes(deckingSpec.thicknessMm) || deckingCustomInput.thickness !== "";
-        const isWidthCustom = ![95, 120, 140, 150].includes(deckingSpec.widthMm) || deckingCustomInput.width !== "";
-        const isLengthCustom = ![2000, 2400, 2800, 3000].includes(deckingSpec.lengthMm) || deckingCustomInput.length !== "";
+        const isThicknessCustom =
+          ![19, 20, 25].includes(deckingSpec.thicknessMm) || deckingCustomInput.thickness !== "";
+        const isWidthCustom =
+          ![95, 120, 140, 150].includes(deckingSpec.widthMm) || deckingCustomInput.width !== "";
+        const isLengthCustom =
+          ![2000, 2400, 2800, 3000].includes(deckingSpec.lengthMm) ||
+          deckingCustomInput.length !== "";
 
         return (
           <div style={{ display: "grid", gap: 12 }}>
@@ -1033,7 +1317,9 @@ export function ControlsPanel({
                     inputMode="decimal"
                     placeholder="두께"
                     value={deckingCustomInput.thickness || String(deckingSpec.thicknessMm)}
-                    onChange={(e) => setDeckingCustomInput((prev) => ({ ...prev, thickness: e.target.value }))}
+                    onChange={(e) =>
+                      setDeckingCustomInput((prev) => ({ ...prev, thickness: e.target.value }))
+                    }
                     onBlur={() => {
                       const val = Number(deckingCustomInput.thickness.replace(/,/g, ""));
                       if (Number.isFinite(val) && val > 0) {
@@ -1054,7 +1340,13 @@ export function ControlsPanel({
                       }
                     }}
                     autoFocus
-                    style={{ width: "100%", padding: "8px 6px", borderRadius: 8, border: "1px solid #ccc", fontSize: 13 }}
+                    style={{
+                      width: "100%",
+                      padding: "8px 6px",
+                      borderRadius: 8,
+                      border: "1px solid #ccc",
+                      fontSize: 13,
+                    }}
                   />
                 ) : (
                   <select
@@ -1062,12 +1354,15 @@ export function ControlsPanel({
                     onChange={(e) => {
                       const val = e.target.value;
                       if (val === "custom") {
-                        setDeckingCustomInput((prev) => ({ ...prev, thickness: String(deckingSpec.thicknessMm) }));
+                        setDeckingCustomInput((prev) => ({
+                          ...prev,
+                          thickness: String(deckingSpec.thicknessMm),
+                        }));
                       } else {
                         setDeckingSpec((prev) => ({ ...prev, thicknessMm: Number(val) }));
                       }
                     }}
-                    style={{ width: "100%", padding: "8px 6px", borderRadius: 8, border: "1px solid #ccc", fontSize: 13 }}
+                    className="decking-select"
                   >
                     <option value={19}>19</option>
                     <option value={20}>20</option>
@@ -1086,7 +1381,9 @@ export function ControlsPanel({
                     inputMode="decimal"
                     placeholder="폭"
                     value={deckingCustomInput.width || String(deckingSpec.widthMm)}
-                    onChange={(e) => setDeckingCustomInput((prev) => ({ ...prev, width: e.target.value }))}
+                    onChange={(e) =>
+                      setDeckingCustomInput((prev) => ({ ...prev, width: e.target.value }))
+                    }
                     onBlur={() => {
                       const val = Number(deckingCustomInput.width.replace(/,/g, ""));
                       if (Number.isFinite(val) && val > 0) {
@@ -1106,7 +1403,13 @@ export function ControlsPanel({
                       }
                     }}
                     autoFocus
-                    style={{ width: "100%", padding: "8px 6px", borderRadius: 8, border: "1px solid #ccc", fontSize: 13 }}
+                    style={{
+                      width: "100%",
+                      padding: "8px 6px",
+                      borderRadius: 8,
+                      border: "1px solid #ccc",
+                      fontSize: 13,
+                    }}
                   />
                 ) : (
                   <select
@@ -1114,12 +1417,15 @@ export function ControlsPanel({
                     onChange={(e) => {
                       const val = e.target.value;
                       if (val === "custom") {
-                        setDeckingCustomInput((prev) => ({ ...prev, width: String(deckingSpec.widthMm) }));
+                        setDeckingCustomInput((prev) => ({
+                          ...prev,
+                          width: String(deckingSpec.widthMm),
+                        }));
                       } else {
                         setDeckingSpec((prev) => ({ ...prev, widthMm: Number(val) }));
                       }
                     }}
-                    style={{ width: "100%", padding: "8px 6px", borderRadius: 8, border: "1px solid #ccc", fontSize: 13 }}
+                    className="decking-select"
                   >
                     <option value={95}>95</option>
                     <option value={120}>120</option>
@@ -1139,7 +1445,9 @@ export function ControlsPanel({
                     inputMode="decimal"
                     placeholder="길이"
                     value={deckingCustomInput.length || String(deckingSpec.lengthMm)}
-                    onChange={(e) => setDeckingCustomInput((prev) => ({ ...prev, length: e.target.value }))}
+                    onChange={(e) =>
+                      setDeckingCustomInput((prev) => ({ ...prev, length: e.target.value }))
+                    }
                     onBlur={() => {
                       const val = Number(deckingCustomInput.length.replace(/,/g, ""));
                       if (Number.isFinite(val) && val > 0) {
@@ -1159,7 +1467,13 @@ export function ControlsPanel({
                       }
                     }}
                     autoFocus
-                    style={{ width: "100%", padding: "8px 6px", borderRadius: 8, border: "1px solid #ccc", fontSize: 13 }}
+                    style={{
+                      width: "100%",
+                      padding: "8px 6px",
+                      borderRadius: 8,
+                      border: "1px solid #ccc",
+                      fontSize: 13,
+                    }}
                   />
                 ) : (
                   <select
@@ -1167,12 +1481,15 @@ export function ControlsPanel({
                     onChange={(e) => {
                       const val = e.target.value;
                       if (val === "custom") {
-                        setDeckingCustomInput((prev) => ({ ...prev, length: String(deckingSpec.lengthMm) }));
+                        setDeckingCustomInput((prev) => ({
+                          ...prev,
+                          length: String(deckingSpec.lengthMm),
+                        }));
                       } else {
                         setDeckingSpec((prev) => ({ ...prev, lengthMm: Number(val) }));
                       }
                     }}
-                    style={{ width: "100%", padding: "8px 6px", borderRadius: 8, border: "1px solid #ccc", fontSize: 13 }}
+                    className="decking-select"
                   >
                     <option value={2000}>2000</option>
                     <option value={2400}>2400</option>
@@ -1184,10 +1501,115 @@ export function ControlsPanel({
               </div>
             </div>
 
-            {/* 현재 선택된 사양 표시 */}
-            <div style={{ fontSize: 12, color: "#888", background: "#f9f9f9", padding: 10, borderRadius: 6 }}>
-              선택된 사양: {deckingSpec.thicknessMm} × {deckingSpec.widthMm} × {deckingSpec.lengthMm.toLocaleString()} mm
-            </div>
+            {/* 적용 버튼 */}
+            <button
+              type="button"
+              onClick={() => setAppliedDeckingSpec({ ...deckingSpec })}
+              style={{
+                width: "100%",
+                padding: "12px 16px",
+                borderRadius: 8,
+                border: "none",
+                background: "#4CAF50",
+                color: "#fff",
+                fontSize: 14,
+                fontWeight: 700,
+                cursor: "pointer",
+                transition: "background 0.2s",
+              }}
+              onMouseOver={(e) => (e.currentTarget.style.background = "#43a047")}
+              onMouseOut={(e) => (e.currentTarget.style.background = "#4CAF50")}
+            >
+              적용
+            </button>
+
+            {/* 적용된 규격 요약 */}
+            {appliedDeckingSpec && (
+              <div
+                style={{
+                  background: "linear-gradient(135deg, #e8f5e9 0%, #c8e6c9 100%)",
+                  borderRadius: 10,
+                  padding: 14,
+                  display: "grid",
+                  gap: 10,
+                }}
+              >
+                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  <span style={{ fontSize: 16 }}>✓</span>
+                  <span style={{ fontSize: 14, fontWeight: 700, color: "#2e7d32" }}>
+                    적용된 제품 규격
+                  </span>
+                </div>
+
+                <div
+                  style={{
+                    background: "#fff",
+                    borderRadius: 8,
+                    padding: 12,
+                    display: "grid",
+                    gap: 8,
+                  }}
+                >
+                  <div
+                    style={{
+                      display: "flex",
+                      justifyContent: "space-between",
+                      alignItems: "center",
+                    }}
+                  >
+                    <span style={{ fontSize: 13, color: "#666" }}>두께</span>
+                    <span style={{ fontSize: 14, fontWeight: 600, color: "#333" }}>
+                      {appliedDeckingSpec.thicknessMm} mm
+                    </span>
+                  </div>
+                  <div
+                    style={{
+                      display: "flex",
+                      justifyContent: "space-between",
+                      alignItems: "center",
+                    }}
+                  >
+                    <span style={{ fontSize: 13, color: "#666" }}>폭</span>
+                    <span style={{ fontSize: 14, fontWeight: 600, color: "#333" }}>
+                      {appliedDeckingSpec.widthMm} mm
+                    </span>
+                  </div>
+                  <div
+                    style={{
+                      display: "flex",
+                      justifyContent: "space-between",
+                      alignItems: "center",
+                    }}
+                  >
+                    <span style={{ fontSize: 13, color: "#666" }}>길이</span>
+                    <span style={{ fontSize: 14, fontWeight: 600, color: "#333" }}>
+                      {appliedDeckingSpec.lengthMm.toLocaleString()} mm
+                    </span>
+                  </div>
+                  <div
+                    style={{
+                      borderTop: "1px solid #eee",
+                      paddingTop: 8,
+                      marginTop: 4,
+                    }}
+                  >
+                    <div
+                      style={{
+                        display: "flex",
+                        justifyContent: "space-between",
+                        alignItems: "center",
+                      }}
+                    >
+                      <span style={{ fontSize: 13, fontWeight: 600, color: "#333" }}>규격</span>
+                      <span style={{ fontSize: 14, fontWeight: 700, color: "#2e7d32" }}>
+                        {appliedDeckingSpec.thicknessMm} × {appliedDeckingSpec.widthMm} ×{" "}
+                        {appliedDeckingSpec.lengthMm.toLocaleString()} mm
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
         );
       })(),
@@ -1206,18 +1628,318 @@ export function ControlsPanel({
       id: "substructure",
       title: "하부 구조",
       content: (
-        <div style={{ display: "grid", gap: 10 }}>
-          {quickSummary("기본값은 자동 계산이며, 필요 시 총 길이를 수동으로 수정할 수 있습니다.")}
+        <div style={{ display: "grid", gap: 16 }}>
+          {quickSummary("하부 구조의 규격과 간격을 설정합니다.")}
 
+          {/* 1. Bearer Settings */}
+          {substructureConfig && (
+            <div style={{ display: "grid", gap: 8 }}>
+              <div style={{ fontWeight: 600, color: "#333", fontSize: 13 }}>멍에 (Bearer)</div>
+              <div style={{ display: "flex", gap: 8 }}>
+                {/* Width x Height Selector */}
+                <select
+                  style={{
+                    flex: 1,
+                    padding: "6px",
+                    borderRadius: 6,
+                    border: "1px solid #ccc",
+                    fontSize: 13,
+                  }}
+                  value={`${substructureConfig.bearerSpec.widthMm}x${substructureConfig.bearerSpec.heightMm}`}
+                  onChange={(e) => {
+                    const [w, h] = e.target.value.split("x").map(Number);
+                    updateSubConfig({
+                      bearerSpec: { ...substructureConfig.bearerSpec, widthMm: w, heightMm: h },
+                    });
+                  }}
+                >
+                  <option value="75x75">75×75</option>
+                  <option value="100x100">100×100</option>
+                  <option value="125x125">125×125</option>
+                </select>
+
+                {/* Thickness Selector */}
+                <select
+                  style={{
+                    width: 80,
+                    padding: "6px",
+                    borderRadius: 6,
+                    border: "1px solid #ccc",
+                    fontSize: 13,
+                  }}
+                  value={substructureConfig.bearerSpec.thicknessMm}
+                  onChange={(e) =>
+                    updateSubConfig({
+                      bearerSpec: {
+                        ...substructureConfig.bearerSpec,
+                        thicknessMm: Number(e.target.value),
+                      },
+                    })
+                  }
+                >
+                  <option value={1.6}>1.6T</option>
+                  <option value={2.0}>2.0T</option>
+                  <option value={2.3}>2.3T</option>
+                  <option value={3.0}>3.0T</option>
+                </select>
+              </div>
+
+              <div
+                style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}
+              >
+                <span style={{ fontSize: 13, color: "#555" }}>최대 간격</span>
+                <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                  <input
+                    type="number"
+                    value={substructureConfig.bearerSpacingMm ?? 600}
+                    onChange={(e) => updateSubConfig({ bearerSpacingMm: Number(e.target.value) })}
+                    style={{
+                      width: 60,
+                      padding: "4px",
+                      borderRadius: 4,
+                      border: "1px solid #ccc",
+                      textAlign: "right",
+                      fontSize: 13,
+                    }}
+                  />
+                  <span style={{ fontSize: 13, color: "#777" }}>mm</span>
+                </div>
+              </div>
+            </div>
+          )}
+
+          <div style={{ height: 1, background: "#eee" }} />
+
+          {/* 2. Joist Settings */}
+          {substructureConfig && (
+            <div style={{ display: "grid", gap: 8 }}>
+              <div style={{ fontWeight: 600, color: "#333", fontSize: 13 }}>장선 (Joist)</div>
+              <div style={{ display: "flex", gap: 8 }}>
+                {/* Width x Height Selector */}
+                <select
+                  style={{
+                    flex: 1,
+                    padding: "6px",
+                    borderRadius: 6,
+                    border: "1px solid #ccc",
+                    fontSize: 13,
+                  }}
+                  value={`${substructureConfig.joistSpec.widthMm}x${substructureConfig.joistSpec.heightMm}`}
+                  onChange={(e) => {
+                    const [w, h] = e.target.value.split("x").map(Number);
+                    updateSubConfig({
+                      joistSpec: { ...substructureConfig.joistSpec, widthMm: w, heightMm: h },
+                    });
+                  }}
+                >
+                  <option value="50x50">50×50</option>
+                  <option value="75x75">75×75</option>
+                </select>
+
+                {/* Thickness Selector */}
+                <select
+                  style={{
+                    width: 80,
+                    padding: "6px",
+                    borderRadius: 6,
+                    border: "1px solid #ccc",
+                    fontSize: 13,
+                  }}
+                  value={substructureConfig.joistSpec.thicknessMm}
+                  onChange={(e) =>
+                    updateSubConfig({
+                      joistSpec: {
+                        ...substructureConfig.joistSpec,
+                        thicknessMm: Number(e.target.value),
+                      },
+                    })
+                  }
+                >
+                  <option value={1.6}>1.6T</option>
+                  <option value={2.0}>2.0T</option>
+                </select>
+              </div>
+
+              <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                <div
+                  style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}
+                >
+                  <span style={{ fontSize: 13, color: "#555" }}>간격 모드</span>
+                  <div
+                    style={{
+                      display: "flex",
+                      gap: 2,
+                      background: "#eee",
+                      padding: 2,
+                      borderRadius: 6,
+                    }}
+                  >
+                    <button
+                      type="button"
+                      onClick={() => updateSubConfig({ joistSpacingMode: "auto" })}
+                      style={{
+                        padding: "4px 8px",
+                        borderRadius: 4,
+                        border: "none",
+                        fontSize: 12,
+                        cursor: "pointer",
+                        background:
+                          !substructureConfig.joistSpacingMode ||
+                          substructureConfig.joistSpacingMode === "auto"
+                            ? "#fff"
+                            : "transparent",
+                        boxShadow:
+                          !substructureConfig.joistSpacingMode ||
+                          substructureConfig.joistSpacingMode === "auto"
+                            ? "0 1px 2px rgba(0,0,0,0.1)"
+                            : "none",
+                      }}
+                    >
+                      자동
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => updateSubConfig({ joistSpacingMode: "manual" })}
+                      style={{
+                        padding: "4px 8px",
+                        borderRadius: 4,
+                        border: "none",
+                        fontSize: 12,
+                        cursor: "pointer",
+                        background:
+                          substructureConfig.joistSpacingMode === "manual" ? "#fff" : "transparent",
+                        boxShadow:
+                          substructureConfig.joistSpacingMode === "manual"
+                            ? "0 1px 2px rgba(0,0,0,0.1)"
+                            : "none",
+                      }}
+                    >
+                      수동
+                    </button>
+                  </div>
+                </div>
+
+                <div
+                  style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}
+                >
+                  <span style={{ fontSize: 13, color: "#555" }}>장선 간격</span>
+                  <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                    <input
+                      type="number"
+                      value={substructureConfig.joistSpacingMm ?? 400}
+                      disabled={
+                        !substructureConfig.joistSpacingMode ||
+                        substructureConfig.joistSpacingMode === "auto"
+                      }
+                      onChange={(e) => updateSubConfig({ joistSpacingMm: Number(e.target.value) })}
+                      style={{
+                        width: 60,
+                        padding: "4px",
+                        borderRadius: 4,
+                        border: "1px solid #ccc",
+                        textAlign: "right",
+                        fontSize: 13,
+                        background:
+                          !substructureConfig.joistSpacingMode ||
+                          substructureConfig.joistSpacingMode === "auto"
+                            ? "#f5f5f5"
+                            : "#fff",
+                        color:
+                          !substructureConfig.joistSpacingMode ||
+                          substructureConfig.joistSpacingMode === "auto"
+                            ? "#999"
+                            : "#000",
+                      }}
+                    />
+                    <span style={{ fontSize: 13, color: "#777" }}>mm</span>
+                  </div>
+                </div>
+                {(!substructureConfig.joistSpacingMode ||
+                  substructureConfig.joistSpacingMode === "auto") &&
+                  deckThicknessMm && (
+                    <div style={{ fontSize: 11, color: "#2e7d32", textAlign: "right" }}>
+                      * 데크 {deckThicknessMm}T 기준 자동 계산됨
+                    </div>
+                  )}
+              </div>
+            </div>
+          )}
+
+          <div style={{ height: 1, background: "#eee" }} />
+
+          {/* 3. Foundation Settings */}
+          {substructureConfig && (
+            <div style={{ display: "grid", gap: 8 }}>
+              <div style={{ fontWeight: 600, color: "#333", fontSize: 13 }}>기초 (Foundation)</div>
+              <div style={{ display: "flex", gap: 8 }}>
+                <select
+                  style={{
+                    flex: 1,
+                    padding: "6px",
+                    borderRadius: 6,
+                    border: "1px solid #ccc",
+                    fontSize: 13,
+                  }}
+                  value={substructureConfig.foundationType}
+                  onChange={(e) =>
+                    updateSubConfig({ foundationType: e.target.value as FoundationType })
+                  }
+                >
+                  <option value="concrete_block">기초석 (Concrete Block)</option>
+                  <option value="anchor_bolt">앙카볼트 (Anchor Bolt)</option>
+                  <option value="rubber_pad">고무패드 (Rubber Pad)</option>
+                  <option value="screw_pile">스크류파일 (Screw Pile)</option>
+                </select>
+              </div>
+
+              <div
+                style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}
+              >
+                <span style={{ fontSize: 13, color: "#555" }}>기초 간격</span>
+                <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                  <input
+                    type="number"
+                    value={substructureConfig.footingSpacingMm ?? 1000}
+                    onChange={(e) => updateSubConfig({ footingSpacingMm: Number(e.target.value) })}
+                    style={{
+                      width: 60,
+                      padding: "4px",
+                      borderRadius: 4,
+                      border: "1px solid #ccc",
+                      textAlign: "right",
+                      fontSize: 13,
+                    }}
+                  />
+                  <span style={{ fontSize: 13, color: "#777" }}>mm</span>
+                </div>
+              </div>
+            </div>
+          )}
+
+          <div style={{ height: 1, background: "#eee" }} />
+
+          {/* 4. Overrides (Existing) */}
           <div style={{ display: "grid", gap: 8 }}>
-            <div style={{ fontWeight: 600, color: "#333" }}>총 길이 오버라이드</div>
-
-            <div style={{ display: "flex", justifyContent: "space-between", gap: 8, alignItems: "center" }}>
+            <div style={{ fontWeight: 600, color: "#333", fontSize: 13 }}>
+              총 길이 오버라이드 (고급)
+            </div>
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "space-between",
+                gap: 8,
+                alignItems: "center",
+              }}
+            >
               <span style={{ fontSize: 13, color: "#555" }}>멍에 총 길이(mm)</span>
               <input
                 type="text"
                 inputMode="decimal"
-                placeholder={substructureAuto ? `자동: ${Math.round(substructureAuto.primaryLenM * 1000)}` : "자동"}
+                placeholder={
+                  substructureAuto
+                    ? `자동: ${Math.round(substructureAuto.primaryLenM * 1000)}`
+                    : "자동"
+                }
                 value={getSubValue("primary")}
                 onChange={(e) => startEditing("sub-primary", e.target.value)}
                 onBlur={() => applySubOverride("primary")}
@@ -1228,16 +1950,32 @@ export function ControlsPanel({
                     e.currentTarget.blur();
                   }
                 }}
-                style={{ width: 140, padding: "6px 8px", borderRadius: 6, border: "1px solid #ccc" }}
+                style={{
+                  width: 140,
+                  padding: "6px 8px",
+                  borderRadius: 6,
+                  border: "1px solid #ccc",
+                }}
               />
             </div>
 
-            <div style={{ display: "flex", justifyContent: "space-between", gap: 8, alignItems: "center" }}>
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "space-between",
+                gap: 8,
+                alignItems: "center",
+              }}
+            >
               <span style={{ fontSize: 13, color: "#555" }}>장선 총 길이(mm)</span>
               <input
                 type="text"
                 inputMode="decimal"
-                placeholder={substructureAuto ? `자동: ${Math.round(substructureAuto.secondaryLenM * 1000)}` : "자동"}
+                placeholder={
+                  substructureAuto
+                    ? `자동: ${Math.round(substructureAuto.secondaryLenM * 1000)}`
+                    : "자동"
+                }
                 value={getSubValue("secondary")}
                 onChange={(e) => startEditing("sub-secondary", e.target.value)}
                 onBlur={() => applySubOverride("secondary")}
@@ -1248,7 +1986,12 @@ export function ControlsPanel({
                     e.currentTarget.blur();
                   }
                 }}
-                style={{ width: 140, padding: "6px 8px", borderRadius: 6, border: "1px solid #ccc" }}
+                style={{
+                  width: 140,
+                  padding: "6px 8px",
+                  borderRadius: 6,
+                  border: "1px solid #ccc",
+                }}
               />
             </div>
 

@@ -7,8 +7,16 @@ interface DeckHoleEdgeHandlesProps {
   cutoutsMeta: CutoutMeta[];
   selectedHoleIndex: number | null;
   isEditable: boolean;
-  onCornerDown: (holeIndex: number, corner: "top-left" | "top-right" | "bottom-left" | "bottom-right", e: React.PointerEvent) => void;
-  onEdgeDown: (holeIndex: number, edge: "top" | "right" | "bottom" | "left", e: React.PointerEvent) => void;
+  onCornerDown: (
+    holeIndex: number,
+    corner: "top-left" | "top-right" | "bottom-left" | "bottom-right",
+    e: React.PointerEvent,
+  ) => void;
+  onEdgeDown: (
+    holeIndex: number,
+    edge: "top" | "right" | "bottom" | "left",
+    e: React.PointerEvent,
+  ) => void;
 }
 
 export const DeckHoleEdgeHandles = React.memo(function DeckHoleEdgeHandles({

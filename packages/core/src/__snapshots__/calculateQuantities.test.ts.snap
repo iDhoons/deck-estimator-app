@@ -3,7 +3,7 @@
 exports[`calculateQuantities (fixtures) > rect-2000x1000 clip 1`] = `
 {
   "anchors": {
-    "qty": 10,
+    "qty": 9,
   },
   "area": {
     "deckM2": 2,
@@ -19,14 +19,188 @@ exports[`calculateQuantities (fixtures) > rect-2000x1000 clip 1`] = `
   "fasteners": {
     "clips": 35,
     "mode": "clip",
-    "screws": undefined,
   },
   "footings": {
-    "qty": 10,
+    "qty": 9,
+  },
+  "structureLayout": {
+    "bearers": [
+      {
+        "x1": 0,
+        "x2": 2000,
+        "y1": 500,
+        "y2": 500,
+      },
+      {
+        "x1": 0,
+        "x2": 2000,
+        "y1": 0,
+        "y2": 0,
+      },
+      {
+        "x1": 2000,
+        "x2": 2000,
+        "y1": 0,
+        "y2": 1000,
+      },
+      {
+        "x1": 2000,
+        "x2": 0,
+        "y1": 1000,
+        "y2": 1000,
+      },
+      {
+        "x1": 0,
+        "x2": 0,
+        "y1": 1000,
+        "y2": 0,
+      },
+    ],
+    "joists": [
+      {
+        "x1": 0.5,
+        "x2": 0.5,
+        "y1": 0,
+        "y2": 1000,
+      },
+      {
+        "x1": 400.5,
+        "x2": 400.5,
+        "y1": 0,
+        "y2": 1000,
+      },
+      {
+        "x1": 800.5,
+        "x2": 800.5,
+        "y1": 0,
+        "y2": 1000,
+      },
+      {
+        "x1": 1200.5,
+        "x2": 1200.5,
+        "y1": 0,
+        "y2": 1000,
+      },
+      {
+        "x1": 1600.5,
+        "x2": 1600.5,
+        "y1": 0,
+        "y2": 1000,
+      },
+    ],
+    "piles": [
+      {
+        "xMm": 0,
+        "yMm": 0,
+      },
+      {
+        "xMm": 1000,
+        "yMm": 0,
+      },
+      {
+        "xMm": 2000,
+        "yMm": 0,
+      },
+      {
+        "xMm": 0,
+        "yMm": 500,
+      },
+      {
+        "xMm": 1000,
+        "yMm": 500,
+      },
+      {
+        "xMm": 2000,
+        "yMm": 500,
+      },
+      {
+        "xMm": 0,
+        "yMm": 1000,
+      },
+      {
+        "xMm": 1000,
+        "yMm": 1000,
+      },
+      {
+        "xMm": 2000,
+        "yMm": 1000,
+      },
+    ],
   },
   "substructure": {
-    "primaryLenM": 4,
+    "primaryLenM": 8,
     "secondaryLenM": 5,
+  },
+  "substructureDetail": {
+    "bearer": {
+      "breakdown": [
+        {
+          "lengthMm": 2000,
+          "qty": 3,
+        },
+        {
+          "lengthMm": 1000,
+          "qty": 2,
+        },
+      ],
+      "innerPieces": 1,
+      "pieces": 5,
+      "rimPieces": 4,
+      "spec": {
+        "heightMm": 100,
+        "id": "100x100x1.6T",
+        "name": "아연도각관 100×100×1.6T",
+        "stockLengthMm": 6000,
+        "thicknessMm": 1.6,
+        "widthMm": 100,
+      },
+      "stockPieces": 2,
+      "totalLengthM": 8,
+    },
+    "foundation": {
+      "qty": 9,
+      "specDescription": "200×200×200mm",
+      "type": "concrete_block",
+    },
+    "hardware": {
+      "anchorBolts": {
+        "qty": 36,
+        "spec": "M12×100",
+      },
+      "angleBrackets": {
+        "qty": 20,
+        "spec": "50×50×5T",
+      },
+      "joistHangers": {
+        "qty": 5,
+        "spec": "50×50",
+      },
+      "selfDrillingScrew": {
+        "qty": 80,
+        "spec": "M5×19",
+      },
+    },
+    "joist": {
+      "breakdown": [
+        {
+          "lengthMm": 1000,
+          "qty": 5,
+        },
+      ],
+      "innerPieces": 5,
+      "pieces": 5,
+      "rimPieces": 0,
+      "spec": {
+        "heightMm": 50,
+        "id": "50x50x1.6T",
+        "name": "아연도각관 50×50×1.6T",
+        "stockLengthMm": 6000,
+        "thicknessMm": 1.6,
+        "widthMm": 50,
+      },
+      "stockPieces": 1,
+      "totalLengthM": 5,
+    },
   },
 }
 `;
@@ -34,7 +208,7 @@ exports[`calculateQuantities (fixtures) > rect-2000x1000 clip 1`] = `
 exports[`calculateQuantities (fixtures) > rect-2000x1000 screw 1`] = `
 {
   "anchors": {
-    "qty": 10,
+    "qty": 9,
   },
   "area": {
     "deckM2": 2,
@@ -48,16 +222,190 @@ exports[`calculateQuantities (fixtures) > rect-2000x1000 screw 1`] = `
     "usedLengthMm": 14000,
   },
   "fasteners": {
-    "clips": undefined,
     "mode": "screw",
     "screws": 70,
   },
   "footings": {
-    "qty": 10,
+    "qty": 9,
+  },
+  "structureLayout": {
+    "bearers": [
+      {
+        "x1": 0,
+        "x2": 2000,
+        "y1": 500,
+        "y2": 500,
+      },
+      {
+        "x1": 0,
+        "x2": 2000,
+        "y1": 0,
+        "y2": 0,
+      },
+      {
+        "x1": 2000,
+        "x2": 2000,
+        "y1": 0,
+        "y2": 1000,
+      },
+      {
+        "x1": 2000,
+        "x2": 0,
+        "y1": 1000,
+        "y2": 1000,
+      },
+      {
+        "x1": 0,
+        "x2": 0,
+        "y1": 1000,
+        "y2": 0,
+      },
+    ],
+    "joists": [
+      {
+        "x1": 0.5,
+        "x2": 0.5,
+        "y1": 0,
+        "y2": 1000,
+      },
+      {
+        "x1": 400.5,
+        "x2": 400.5,
+        "y1": 0,
+        "y2": 1000,
+      },
+      {
+        "x1": 800.5,
+        "x2": 800.5,
+        "y1": 0,
+        "y2": 1000,
+      },
+      {
+        "x1": 1200.5,
+        "x2": 1200.5,
+        "y1": 0,
+        "y2": 1000,
+      },
+      {
+        "x1": 1600.5,
+        "x2": 1600.5,
+        "y1": 0,
+        "y2": 1000,
+      },
+    ],
+    "piles": [
+      {
+        "xMm": 0,
+        "yMm": 0,
+      },
+      {
+        "xMm": 1000,
+        "yMm": 0,
+      },
+      {
+        "xMm": 2000,
+        "yMm": 0,
+      },
+      {
+        "xMm": 0,
+        "yMm": 500,
+      },
+      {
+        "xMm": 1000,
+        "yMm": 500,
+      },
+      {
+        "xMm": 2000,
+        "yMm": 500,
+      },
+      {
+        "xMm": 0,
+        "yMm": 1000,
+      },
+      {
+        "xMm": 1000,
+        "yMm": 1000,
+      },
+      {
+        "xMm": 2000,
+        "yMm": 1000,
+      },
+    ],
   },
   "substructure": {
-    "primaryLenM": 4,
+    "primaryLenM": 8,
     "secondaryLenM": 5,
+  },
+  "substructureDetail": {
+    "bearer": {
+      "breakdown": [
+        {
+          "lengthMm": 2000,
+          "qty": 3,
+        },
+        {
+          "lengthMm": 1000,
+          "qty": 2,
+        },
+      ],
+      "innerPieces": 1,
+      "pieces": 5,
+      "rimPieces": 4,
+      "spec": {
+        "heightMm": 100,
+        "id": "100x100x1.6T",
+        "name": "아연도각관 100×100×1.6T",
+        "stockLengthMm": 6000,
+        "thicknessMm": 1.6,
+        "widthMm": 100,
+      },
+      "stockPieces": 2,
+      "totalLengthM": 8,
+    },
+    "foundation": {
+      "qty": 9,
+      "specDescription": "200×200×200mm",
+      "type": "concrete_block",
+    },
+    "hardware": {
+      "anchorBolts": {
+        "qty": 36,
+        "spec": "M12×100",
+      },
+      "angleBrackets": {
+        "qty": 20,
+        "spec": "50×50×5T",
+      },
+      "joistHangers": {
+        "qty": 5,
+        "spec": "50×50",
+      },
+      "selfDrillingScrew": {
+        "qty": 80,
+        "spec": "M5×19",
+      },
+    },
+    "joist": {
+      "breakdown": [
+        {
+          "lengthMm": 1000,
+          "qty": 5,
+        },
+      ],
+      "innerPieces": 5,
+      "pieces": 5,
+      "rimPieces": 0,
+      "spec": {
+        "heightMm": 50,
+        "id": "50x50x1.6T",
+        "name": "아연도각관 50×50×1.6T",
+        "stockLengthMm": 6000,
+        "thicknessMm": 1.6,
+        "widthMm": 50,
+      },
+      "stockPieces": 1,
+      "totalLengthM": 5,
+    },
   },
 }
 `;
@@ -65,7 +413,7 @@ exports[`calculateQuantities (fixtures) > rect-2000x1000 screw 1`] = `
 exports[`calculateQuantities (fixtures) > rect-2000x1000-rot90 clip 1`] = `
 {
   "anchors": {
-    "qty": 12,
+    "qty": 10,
   },
   "area": {
     "deckM2": 2,
@@ -81,14 +429,192 @@ exports[`calculateQuantities (fixtures) > rect-2000x1000-rot90 clip 1`] = `
   "fasteners": {
     "clips": 42,
     "mode": "clip",
-    "screws": undefined,
   },
   "footings": {
-    "qty": 12,
+    "qty": 10,
+  },
+  "structureLayout": {
+    "bearers": [
+      {
+        "x1": 1500,
+        "x2": 1500,
+        "y1": 0,
+        "y2": 1000,
+      },
+      {
+        "x1": 1000,
+        "x2": 1000.0000000000001,
+        "y1": 0,
+        "y2": 999.9999999999999,
+      },
+      {
+        "x1": 500,
+        "x2": 500.00000000000006,
+        "y1": 0,
+        "y2": 1000,
+      },
+      {
+        "x1": 0,
+        "x2": 2000,
+        "y1": 0,
+        "y2": 0,
+      },
+      {
+        "x1": 2000,
+        "x2": 2000,
+        "y1": 0,
+        "y2": 1000,
+      },
+      {
+        "x1": 2000,
+        "x2": 0,
+        "y1": 1000,
+        "y2": 1000,
+      },
+      {
+        "x1": 0,
+        "x2": 0,
+        "y1": 1000,
+        "y2": 0,
+      },
+    ],
+    "joists": [
+      {
+        "x1": 2000,
+        "x2": -7.888609052210118e-31,
+        "y1": 100.49999999999993,
+        "y2": 100.50000000000006,
+      },
+      {
+        "x1": 2000,
+        "x2": -6.310887241768095e-30,
+        "y1": 500.49999999999994,
+        "y2": 500.50000000000006,
+      },
+      {
+        "x1": 2000,
+        "x2": -6.310887241768095e-30,
+        "y1": 900.4999999999999,
+        "y2": 900.5,
+      },
+    ],
+    "piles": [
+      {
+        "xMm": 2000,
+        "yMm": -1.2246467991473532e-13,
+      },
+      {
+        "xMm": 2000,
+        "yMm": 999.9999999999999,
+      },
+      {
+        "xMm": 1500,
+        "yMm": -9.184850993605149e-14,
+      },
+      {
+        "xMm": 1500,
+        "yMm": 999.9999999999999,
+      },
+      {
+        "xMm": 1000,
+        "yMm": -6.123233995736766e-14,
+      },
+      {
+        "xMm": 1000.0000000000001,
+        "yMm": 999.9999999999999,
+      },
+      {
+        "xMm": 500,
+        "yMm": -3.061616997868383e-14,
+      },
+      {
+        "xMm": 500.00000000000006,
+        "yMm": 1000,
+      },
+      {
+        "xMm": 0,
+        "yMm": 0,
+      },
+      {
+        "xMm": 6.123233995736766e-14,
+        "yMm": 1000,
+      },
+    ],
   },
   "substructure": {
-    "primaryLenM": 4,
+    "primaryLenM": 9,
     "secondaryLenM": 6,
+  },
+  "substructureDetail": {
+    "bearer": {
+      "breakdown": [
+        {
+          "lengthMm": 2000,
+          "qty": 2,
+        },
+        {
+          "lengthMm": 1000,
+          "qty": 5,
+        },
+      ],
+      "innerPieces": 3,
+      "pieces": 7,
+      "rimPieces": 4,
+      "spec": {
+        "heightMm": 100,
+        "id": "100x100x1.6T",
+        "name": "아연도각관 100×100×1.6T",
+        "stockLengthMm": 6000,
+        "thicknessMm": 1.6,
+        "widthMm": 100,
+      },
+      "stockPieces": 2,
+      "totalLengthM": 9,
+    },
+    "foundation": {
+      "qty": 10,
+      "specDescription": "200×200×200mm",
+      "type": "concrete_block",
+    },
+    "hardware": {
+      "anchorBolts": {
+        "qty": 40,
+        "spec": "M12×100",
+      },
+      "angleBrackets": {
+        "qty": 20,
+        "spec": "50×50×5T",
+      },
+      "joistHangers": {
+        "qty": 3,
+        "spec": "50×50",
+      },
+      "selfDrillingScrew": {
+        "qty": 80,
+        "spec": "M5×19",
+      },
+    },
+    "joist": {
+      "breakdown": [
+        {
+          "lengthMm": 2000,
+          "qty": 3,
+        },
+      ],
+      "innerPieces": 3,
+      "pieces": 3,
+      "rimPieces": 0,
+      "spec": {
+        "heightMm": 50,
+        "id": "50x50x1.6T",
+        "name": "아연도각관 50×50×1.6T",
+        "stockLengthMm": 6000,
+        "thicknessMm": 1.6,
+        "widthMm": 50,
+      },
+      "stockPieces": 2,
+      "totalLengthM": 6,
+    },
   },
 }
 `;
@@ -96,7 +622,7 @@ exports[`calculateQuantities (fixtures) > rect-2000x1000-rot90 clip 1`] = `
 exports[`calculateQuantities (fixtures) > rect-2000x1000-rot90 screw 1`] = `
 {
   "anchors": {
-    "qty": 12,
+    "qty": 10,
   },
   "area": {
     "deckM2": 2,
@@ -110,16 +636,194 @@ exports[`calculateQuantities (fixtures) > rect-2000x1000-rot90 screw 1`] = `
     "usedLengthMm": 14000,
   },
   "fasteners": {
-    "clips": undefined,
     "mode": "screw",
     "screws": 84,
   },
   "footings": {
-    "qty": 12,
+    "qty": 10,
+  },
+  "structureLayout": {
+    "bearers": [
+      {
+        "x1": 1500,
+        "x2": 1500,
+        "y1": 0,
+        "y2": 1000,
+      },
+      {
+        "x1": 1000,
+        "x2": 1000.0000000000001,
+        "y1": 0,
+        "y2": 999.9999999999999,
+      },
+      {
+        "x1": 500,
+        "x2": 500.00000000000006,
+        "y1": 0,
+        "y2": 1000,
+      },
+      {
+        "x1": 0,
+        "x2": 2000,
+        "y1": 0,
+        "y2": 0,
+      },
+      {
+        "x1": 2000,
+        "x2": 2000,
+        "y1": 0,
+        "y2": 1000,
+      },
+      {
+        "x1": 2000,
+        "x2": 0,
+        "y1": 1000,
+        "y2": 1000,
+      },
+      {
+        "x1": 0,
+        "x2": 0,
+        "y1": 1000,
+        "y2": 0,
+      },
+    ],
+    "joists": [
+      {
+        "x1": 2000,
+        "x2": -7.888609052210118e-31,
+        "y1": 100.49999999999993,
+        "y2": 100.50000000000006,
+      },
+      {
+        "x1": 2000,
+        "x2": -6.310887241768095e-30,
+        "y1": 500.49999999999994,
+        "y2": 500.50000000000006,
+      },
+      {
+        "x1": 2000,
+        "x2": -6.310887241768095e-30,
+        "y1": 900.4999999999999,
+        "y2": 900.5,
+      },
+    ],
+    "piles": [
+      {
+        "xMm": 2000,
+        "yMm": -1.2246467991473532e-13,
+      },
+      {
+        "xMm": 2000,
+        "yMm": 999.9999999999999,
+      },
+      {
+        "xMm": 1500,
+        "yMm": -9.184850993605149e-14,
+      },
+      {
+        "xMm": 1500,
+        "yMm": 999.9999999999999,
+      },
+      {
+        "xMm": 1000,
+        "yMm": -6.123233995736766e-14,
+      },
+      {
+        "xMm": 1000.0000000000001,
+        "yMm": 999.9999999999999,
+      },
+      {
+        "xMm": 500,
+        "yMm": -3.061616997868383e-14,
+      },
+      {
+        "xMm": 500.00000000000006,
+        "yMm": 1000,
+      },
+      {
+        "xMm": 0,
+        "yMm": 0,
+      },
+      {
+        "xMm": 6.123233995736766e-14,
+        "yMm": 1000,
+      },
+    ],
   },
   "substructure": {
-    "primaryLenM": 4,
+    "primaryLenM": 9,
     "secondaryLenM": 6,
+  },
+  "substructureDetail": {
+    "bearer": {
+      "breakdown": [
+        {
+          "lengthMm": 2000,
+          "qty": 2,
+        },
+        {
+          "lengthMm": 1000,
+          "qty": 5,
+        },
+      ],
+      "innerPieces": 3,
+      "pieces": 7,
+      "rimPieces": 4,
+      "spec": {
+        "heightMm": 100,
+        "id": "100x100x1.6T",
+        "name": "아연도각관 100×100×1.6T",
+        "stockLengthMm": 6000,
+        "thicknessMm": 1.6,
+        "widthMm": 100,
+      },
+      "stockPieces": 2,
+      "totalLengthM": 9,
+    },
+    "foundation": {
+      "qty": 10,
+      "specDescription": "200×200×200mm",
+      "type": "concrete_block",
+    },
+    "hardware": {
+      "anchorBolts": {
+        "qty": 40,
+        "spec": "M12×100",
+      },
+      "angleBrackets": {
+        "qty": 20,
+        "spec": "50×50×5T",
+      },
+      "joistHangers": {
+        "qty": 3,
+        "spec": "50×50",
+      },
+      "selfDrillingScrew": {
+        "qty": 80,
+        "spec": "M5×19",
+      },
+    },
+    "joist": {
+      "breakdown": [
+        {
+          "lengthMm": 2000,
+          "qty": 3,
+        },
+      ],
+      "innerPieces": 3,
+      "pieces": 3,
+      "rimPieces": 0,
+      "spec": {
+        "heightMm": 50,
+        "id": "50x50x1.6T",
+        "name": "아연도각관 50×50×1.6T",
+        "stockLengthMm": 6000,
+        "thicknessMm": 1.6,
+        "widthMm": 50,
+      },
+      "stockPieces": 2,
+      "totalLengthM": 6,
+    },
   },
 }
 `;
@@ -127,12 +831,12 @@ exports[`calculateQuantities (fixtures) > rect-2000x1000-rot90 screw 1`] = `
 exports[`calculateQuantities (fixtures) > rect-2000x1000-with-stairs clip 1`] = `
 {
   "anchors": {
-    "qty": 10,
+    "qty": 9,
   },
   "area": {
     "deckM2": 2,
-    "stairsM2": 0.3,
-    "totalM2": 2.3,
+    "stairsM2": 0,
+    "totalM2": 2,
   },
   "boards": {
     "lossRateApplied": 0.03,
@@ -143,14 +847,195 @@ exports[`calculateQuantities (fixtures) > rect-2000x1000-with-stairs clip 1`] = 
   "fasteners": {
     "clips": 35,
     "mode": "clip",
-    "screws": undefined,
   },
   "footings": {
-    "qty": 10,
+    "qty": 9,
+  },
+  "stairs": {
+    "enabled": true,
+    "items": [],
+    "riserAreaM2": 0,
+    "totalAreaM2": 0,
+    "treadAreaM2": 0,
+  },
+  "structureLayout": {
+    "bearers": [
+      {
+        "x1": 0,
+        "x2": 2000,
+        "y1": 500,
+        "y2": 500,
+      },
+      {
+        "x1": 0,
+        "x2": 2000,
+        "y1": 0,
+        "y2": 0,
+      },
+      {
+        "x1": 2000,
+        "x2": 2000,
+        "y1": 0,
+        "y2": 1000,
+      },
+      {
+        "x1": 2000,
+        "x2": 0,
+        "y1": 1000,
+        "y2": 1000,
+      },
+      {
+        "x1": 0,
+        "x2": 0,
+        "y1": 1000,
+        "y2": 0,
+      },
+    ],
+    "joists": [
+      {
+        "x1": 0.5,
+        "x2": 0.5,
+        "y1": 0,
+        "y2": 1000,
+      },
+      {
+        "x1": 400.5,
+        "x2": 400.5,
+        "y1": 0,
+        "y2": 1000,
+      },
+      {
+        "x1": 800.5,
+        "x2": 800.5,
+        "y1": 0,
+        "y2": 1000,
+      },
+      {
+        "x1": 1200.5,
+        "x2": 1200.5,
+        "y1": 0,
+        "y2": 1000,
+      },
+      {
+        "x1": 1600.5,
+        "x2": 1600.5,
+        "y1": 0,
+        "y2": 1000,
+      },
+    ],
+    "piles": [
+      {
+        "xMm": 0,
+        "yMm": 0,
+      },
+      {
+        "xMm": 1000,
+        "yMm": 0,
+      },
+      {
+        "xMm": 2000,
+        "yMm": 0,
+      },
+      {
+        "xMm": 0,
+        "yMm": 500,
+      },
+      {
+        "xMm": 1000,
+        "yMm": 500,
+      },
+      {
+        "xMm": 2000,
+        "yMm": 500,
+      },
+      {
+        "xMm": 0,
+        "yMm": 1000,
+      },
+      {
+        "xMm": 1000,
+        "yMm": 1000,
+      },
+      {
+        "xMm": 2000,
+        "yMm": 1000,
+      },
+    ],
   },
   "substructure": {
-    "primaryLenM": 4,
+    "primaryLenM": 8,
     "secondaryLenM": 5,
+  },
+  "substructureDetail": {
+    "bearer": {
+      "breakdown": [
+        {
+          "lengthMm": 2000,
+          "qty": 3,
+        },
+        {
+          "lengthMm": 1000,
+          "qty": 2,
+        },
+      ],
+      "innerPieces": 1,
+      "pieces": 5,
+      "rimPieces": 4,
+      "spec": {
+        "heightMm": 100,
+        "id": "100x100x1.6T",
+        "name": "아연도각관 100×100×1.6T",
+        "stockLengthMm": 6000,
+        "thicknessMm": 1.6,
+        "widthMm": 100,
+      },
+      "stockPieces": 2,
+      "totalLengthM": 8,
+    },
+    "foundation": {
+      "qty": 9,
+      "specDescription": "200×200×200mm",
+      "type": "concrete_block",
+    },
+    "hardware": {
+      "anchorBolts": {
+        "qty": 36,
+        "spec": "M12×100",
+      },
+      "angleBrackets": {
+        "qty": 20,
+        "spec": "50×50×5T",
+      },
+      "joistHangers": {
+        "qty": 5,
+        "spec": "50×50",
+      },
+      "selfDrillingScrew": {
+        "qty": 80,
+        "spec": "M5×19",
+      },
+    },
+    "joist": {
+      "breakdown": [
+        {
+          "lengthMm": 1000,
+          "qty": 5,
+        },
+      ],
+      "innerPieces": 5,
+      "pieces": 5,
+      "rimPieces": 0,
+      "spec": {
+        "heightMm": 50,
+        "id": "50x50x1.6T",
+        "name": "아연도각관 50×50×1.6T",
+        "stockLengthMm": 6000,
+        "thicknessMm": 1.6,
+        "widthMm": 50,
+      },
+      "stockPieces": 1,
+      "totalLengthM": 5,
+    },
   },
 }
 `;
@@ -158,12 +1043,12 @@ exports[`calculateQuantities (fixtures) > rect-2000x1000-with-stairs clip 1`] = 
 exports[`calculateQuantities (fixtures) > rect-2000x1000-with-stairs screw 1`] = `
 {
   "anchors": {
-    "qty": 10,
+    "qty": 9,
   },
   "area": {
     "deckM2": 2,
-    "stairsM2": 0.3,
-    "totalM2": 2.3,
+    "stairsM2": 0,
+    "totalM2": 2,
   },
   "boards": {
     "lossRateApplied": 0.03,
@@ -172,16 +1057,197 @@ exports[`calculateQuantities (fixtures) > rect-2000x1000-with-stairs screw 1`] =
     "usedLengthMm": 14000,
   },
   "fasteners": {
-    "clips": undefined,
     "mode": "screw",
     "screws": 70,
   },
   "footings": {
-    "qty": 10,
+    "qty": 9,
+  },
+  "stairs": {
+    "enabled": true,
+    "items": [],
+    "riserAreaM2": 0,
+    "totalAreaM2": 0,
+    "treadAreaM2": 0,
+  },
+  "structureLayout": {
+    "bearers": [
+      {
+        "x1": 0,
+        "x2": 2000,
+        "y1": 500,
+        "y2": 500,
+      },
+      {
+        "x1": 0,
+        "x2": 2000,
+        "y1": 0,
+        "y2": 0,
+      },
+      {
+        "x1": 2000,
+        "x2": 2000,
+        "y1": 0,
+        "y2": 1000,
+      },
+      {
+        "x1": 2000,
+        "x2": 0,
+        "y1": 1000,
+        "y2": 1000,
+      },
+      {
+        "x1": 0,
+        "x2": 0,
+        "y1": 1000,
+        "y2": 0,
+      },
+    ],
+    "joists": [
+      {
+        "x1": 0.5,
+        "x2": 0.5,
+        "y1": 0,
+        "y2": 1000,
+      },
+      {
+        "x1": 400.5,
+        "x2": 400.5,
+        "y1": 0,
+        "y2": 1000,
+      },
+      {
+        "x1": 800.5,
+        "x2": 800.5,
+        "y1": 0,
+        "y2": 1000,
+      },
+      {
+        "x1": 1200.5,
+        "x2": 1200.5,
+        "y1": 0,
+        "y2": 1000,
+      },
+      {
+        "x1": 1600.5,
+        "x2": 1600.5,
+        "y1": 0,
+        "y2": 1000,
+      },
+    ],
+    "piles": [
+      {
+        "xMm": 0,
+        "yMm": 0,
+      },
+      {
+        "xMm": 1000,
+        "yMm": 0,
+      },
+      {
+        "xMm": 2000,
+        "yMm": 0,
+      },
+      {
+        "xMm": 0,
+        "yMm": 500,
+      },
+      {
+        "xMm": 1000,
+        "yMm": 500,
+      },
+      {
+        "xMm": 2000,
+        "yMm": 500,
+      },
+      {
+        "xMm": 0,
+        "yMm": 1000,
+      },
+      {
+        "xMm": 1000,
+        "yMm": 1000,
+      },
+      {
+        "xMm": 2000,
+        "yMm": 1000,
+      },
+    ],
   },
   "substructure": {
-    "primaryLenM": 4,
+    "primaryLenM": 8,
     "secondaryLenM": 5,
+  },
+  "substructureDetail": {
+    "bearer": {
+      "breakdown": [
+        {
+          "lengthMm": 2000,
+          "qty": 3,
+        },
+        {
+          "lengthMm": 1000,
+          "qty": 2,
+        },
+      ],
+      "innerPieces": 1,
+      "pieces": 5,
+      "rimPieces": 4,
+      "spec": {
+        "heightMm": 100,
+        "id": "100x100x1.6T",
+        "name": "아연도각관 100×100×1.6T",
+        "stockLengthMm": 6000,
+        "thicknessMm": 1.6,
+        "widthMm": 100,
+      },
+      "stockPieces": 2,
+      "totalLengthM": 8,
+    },
+    "foundation": {
+      "qty": 9,
+      "specDescription": "200×200×200mm",
+      "type": "concrete_block",
+    },
+    "hardware": {
+      "anchorBolts": {
+        "qty": 36,
+        "spec": "M12×100",
+      },
+      "angleBrackets": {
+        "qty": 20,
+        "spec": "50×50×5T",
+      },
+      "joistHangers": {
+        "qty": 5,
+        "spec": "50×50",
+      },
+      "selfDrillingScrew": {
+        "qty": 80,
+        "spec": "M5×19",
+      },
+    },
+    "joist": {
+      "breakdown": [
+        {
+          "lengthMm": 1000,
+          "qty": 5,
+        },
+      ],
+      "innerPieces": 5,
+      "pieces": 5,
+      "rimPieces": 0,
+      "spec": {
+        "heightMm": 50,
+        "id": "50x50x1.6T",
+        "name": "아연도각관 50×50×1.6T",
+        "stockLengthMm": 6000,
+        "thicknessMm": 1.6,
+        "widthMm": 50,
+      },
+      "stockPieces": 1,
+      "totalLengthM": 5,
+    },
   },
 }
 `;

@@ -1,0 +1,13 @@
+**/node_modules/**
+**/dist/**
+**/.vite/**
+**/.tmp/**
+**/.cache/**
+**/coverage/**
+**/*.snap
+**/*.map
+package-lock.json
+apps/web/package-lock.json
+packages/core/package-lock.json
+
+

@@ -1,16 +1,10 @@
-import type { FasteningMode, Plan, Product, Quantities, Ruleset } from "./types.js";
-
-type StringerMaterial = {
-  thicknessMm: number;
-  widthMm: number;
-  stockLengthMm: number;
-};
+import type { Plan, Quantities } from "./types.js";
 
 export function calculateStairs(
   plan: Plan,
-  product: Product,
-  rules: Ruleset,
-  fasteningMode: FasteningMode
+  _product: unknown,
+  _rules: unknown,
+  _fasteningMode: unknown,
 ): Quantities["stairs"] | undefined {
   if (!plan.stairs?.enabled) return undefined;
 

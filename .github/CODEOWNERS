@@ -1,0 +1,17 @@
+# 기본 코드오너 설정
+# - CODEOWNERS는 GitHub 설정에서 "Require review from Code Owners"를 켰을 때 강제됩니다.
+
+# 모든 변경에 대한 기본 오너
+* @iDhoons
+
+# 핵심 로직
+/packages/core/ @iDhoons
+
+# 프론트엔드
+/apps/web/ @iDhoons
+
+# CI/자동화/가이드 문서
+/.github/ @iDhoons
+/DEVELOPMENT_GUIDELINES.md @iDhoons
+/ARCHITECTURE.md @iDhoons
+

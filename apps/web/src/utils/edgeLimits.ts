@@ -1,11 +1,11 @@
 import type { PlanPoint } from "../types";
 
 export function computeEdgeLimits(
-    originalPoints: PlanPoint[],
-    vertexIndices: number[],
-    orientation: "horizontal" | "vertical"
+  _originalPoints: PlanPoint[],
+  _vertexIndices: number[],
+  _orientation: "horizontal" | "vertical",
 ) {
-    // Simplistic placeholder - real logic is in DeckCanvas or needs extraction
-    // For now, return "no limit" to allow compilation, or extract the real function if we find it in DeckCanvas
-    return { minDelta: -Infinity, maxDelta: Infinity };
+  // TODO: Implement real logic - currently placeholder
+  // For now, return "no limit" to allow compilation
+  return { minDelta: -Infinity, maxDelta: Infinity };
 }

@@ -23,25 +23,26 @@ export function CutPlanView({ cutPlan, width = 900 }: { cutPlan: CutPlan; width?
 
   const groups = useMemo(() => {
     const s = new Set<string>();
-    for (const r of cutPlan.rows) for (const p of r.pieces) if (p.source === "stock") s.add(p.colorGroup);
+    for (const r of cutPlan.rows)
+      for (const p of r.pieces) if (p.source === "stock") s.add(p.colorGroup);
     return Array.from(s).sort((a, b) => a.localeCompare(b));
   }, [cutPlan]);
   const stats = useMemo(() => {
-  let stockPieces = 0;
-  let offcutPieces = 0;
-  let offcutLenMm = 0;
+    let stockPieces = 0;
+    let offcutPieces = 0;
+    let offcutLenMm = 0;
 
-  for (const r of cutPlan.rows) {
-    for (const p of r.pieces) {
-      if (p.source === "stock") stockPieces += 1;
-      else {
-        offcutPieces += 1;
-        offcutLenMm += p.lengthMm;
+    for (const r of cutPlan.rows) {
+      for (const p of r.pieces) {
+        if (p.source === "stock") stockPieces += 1;
+        else {
+          offcutPieces += 1;
+          offcutLenMm += p.lengthMm;
+        }
       }
     }
-  }
-  return { stockPieces, offcutPieces, offcutLenMm };
-}, [cutPlan]);
+    return { stockPieces, offcutPieces, offcutLenMm };
+  }, [cutPlan]);
 
   return (
     <div style={{ border: "1px solid #333", borderRadius: 10, padding: 12 }}>
@@ -49,16 +50,21 @@ export function CutPlanView({ cutPlan, width = 900 }: { cutPlan: CutPlan; width?
         {t.section.cutPlan} · {t.label.stockLen}: {fmtInt(stock)}mm
       </div>
       <div style={{ marginBottom: 8, fontSize: 12, opacity: 0.9 }}>
-  새 보드 사용 조각: <b>{stats.stockPieces}</b> ·
-  오프컷 재사용: <b>{stats.offcutPieces}</b>회 ·
-  재사용 길이: <b>{(stats.offcutLenMm / 1000).toFixed(2)}</b>m
-</div>
+        새 보드 사용 조각: <b>{stats.stockPieces}</b> · 오프컷 재사용: <b>{stats.offcutPieces}</b>회
+        · 재사용 길이: <b>{(stats.offcutLenMm / 1000).toFixed(2)}</b>m
+      </div>
 
       {/* legend / controls */}
-      <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center", marginBottom: 10 }}>
-        <div style={{ fontSize: 12, opacity: 0.85 }}>
-          클릭: 동일 그룹 강조 · 다시 클릭: 해제
-        </div>
+      <div
+        style={{
+          display: "flex",
+          gap: 10,
+          flexWrap: "wrap",
+          alignItems: "center",
+          marginBottom: 10,
+        }}
+      >
+        <div style={{ fontSize: 12, opacity: 0.85 }}>클릭: 동일 그룹 강조 · 다시 클릭: 해제</div>
         <button
           onClick={() => setActiveGroup(null)}
           style={{
@@ -67,7 +73,7 @@ export function CutPlanView({ cutPlan, width = 900 }: { cutPlan: CutPlan; width?
             border: "1px solid #444",
             background: "#111",
             color: "#ddd",
-            cursor: "pointer"
+            cursor: "pointer",
           }}
         >
           강조 해제
@@ -83,7 +89,7 @@ export function CutPlanView({ cutPlan, width = 900 }: { cutPlan: CutPlan; width?
               borderRadius: 999,
               border: "1px dashed #bbb",
               color: "#ddd",
-              fontSize: 12
+              fontSize: 12,
             }}
             title="오프컷(재사용)"
           >
@@ -106,18 +112,24 @@ export function CutPlanView({ cutPlan, width = 900 }: { cutPlan: CutPlan; width?
                 color: "#ddd",
                 fontSize: 12,
                 cursor: "pointer",
-                opacity: activeGroup && activeGroup !== g ? 0.35 : 1
+                opacity: activeGroup && activeGroup !== g ? 0.35 : 1,
               }}
               title={`그룹 ${g}`}
             >
-              <span style={{ width: 10, height: 10, background: hashColor(g), display: "inline-block" }} />
+              <span
+                style={{ width: 10, height: 10, background: hashColor(g), display: "inline-block" }}
+              />
               {g}
             </button>
           ))}
         </div>
       </div>
 
-      <svg width={width} height={svgH} style={{ display: "block", background: "#0b0b0b", borderRadius: 8 }}>
+      <svg
+        width={width}
+        height={svgH}
+        style={{ display: "block", background: "#0b0b0b", borderRadius: 8 }}
+      >
         {cutPlan.rows.map((row, idx) => {
           const y = pad + idx * (rowHeight + rowGap) + 10;
           let xCursor = pad + labelW;
@@ -188,7 +200,8 @@ export function CutPlanView({ cutPlan, width = 900 }: { cutPlan: CutPlan; width?
       </svg>
 
       <div style={{ marginTop: 8, fontSize: 12, opacity: 0.85 }}>
-        ※ 현재는 행별 필요 길이를 직사각형 스팬으로 근사합니다. (다음 단계: 폴리곤 슬라이스 기반 정확 길이)
+        ※ 현재는 행별 필요 길이를 직사각형 스팬으로 근사합니다. (다음 단계: 폴리곤 슬라이스 기반
+        정확 길이)
       </div>
     </div>
   );

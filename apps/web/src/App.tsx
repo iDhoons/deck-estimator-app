@@ -4,6 +4,7 @@ import {
   buildCutPlan,
   type FasteningMode,
   type Ruleset,
+  type SubstructureConfig,
 } from "@deck/core";
 import { t } from "./i18n";
 import { DeckCanvas, type ViewMode } from "./components/DeckCanvas";
@@ -11,7 +12,6 @@ import { FreeDrawCanvas } from "./components/FreeDrawCanvas";
 import { ControlsPanel } from "./components/ControlsPanel";
 import { ResultsPanel } from "./components/ResultsPanel";
 import { getEdgeList } from "./geometry/edges";
-import { polygonCentroid } from "./geometry/polygon";
 import { useDeckProject } from "./hooks/useDeckProject";
 import { persistence } from "./utils/persistence";
 import { BASE_RULES, SHAPE_PRESETS, PRODUCT_DEFAULTS } from "./constants/defaults";
@@ -26,6 +26,20 @@ export default function App() {
 
   // --- Local State (UI only)
   const [mode, setMode] = useState<Mode | null>(null);
+
+  // Substructure Configuration State
+  const [substructureConfig, setSubstructureConfig] = useState<SubstructureConfig>({
+    bearerSpec: { widthMm: 100, heightMm: 100, thicknessMm: 1.6, stockLengthMm: 6000 },
+    joistSpec: { widthMm: 50, heightMm: 50, thicknessMm: 1.6, stockLengthMm: 6000 },
+    bearerSpacingMm: 600,
+    joistSpacingMm: 400,
+    joistSpacingMode: "auto",
+    foundationType: "concrete_block",
+    footingSpacingMm: 1800,
+    stockLengthMm: 6000,
+    lossRate: 0.05,
+  });
+
   const fastening: FasteningMode = "clip";
   const [viewMode, setViewMode] = useState<ViewMode>("deck");
   const [showResults, setShowResults] = useState(false);
@@ -65,19 +79,37 @@ export default function App() {
   // --- Derived
   const effectiveMode: Mode = mode ?? "consumer";
 
-  const rules: Ruleset = useMemo(
-    () => ({ ...BASE_RULES, mode: effectiveMode }),
-    [effectiveMode]
-  );
+  const rules: Ruleset = useMemo(() => {
+    // 장선 간격 결정
+    // TODO: 추후 데크재 두께 상태를 App으로 끌어올려 연동 필요. 현재는 기본 25mm(400mm 간격) 가정
+    const autoSpacing = 400;
+    const joistSpacing =
+      substructureConfig.joistSpacingMode === "manual" && substructureConfig.joistSpacingMm
+        ? substructureConfig.joistSpacingMm
+        : autoSpacing;
+
+    return {
+      ...BASE_RULES,
+      mode: effectiveMode,
+      substructure: {
+        ...substructureConfig,
+        joistSpacingMm: joistSpacing,
+      },
+      primarySpacingMm: substructureConfig.bearerSpacingMm ?? 600,
+      secondarySpacingMm: joistSpacing,
+      footingSpacingMm: substructureConfig.footingSpacingMm ?? 1000,
+    };
+  }, [effectiveMode, substructureConfig]);
 
   const out = useMemo(() => {
     return calculateQuantities(plan, PRODUCT_DEFAULTS, rules, fastening);
   }, [plan, rules, fastening]);
 
   const cutPlan = useMemo(() => {
-    if (effectiveMode !== "pro") return null;
-    return buildCutPlan(plan, PRODUCT_DEFAULTS, rules);
-  }, [effectiveMode, plan, rules]);
+    // 캔버스 보드 패턴 표시를 위해 항상 cutPlan 생성
+    // 시각화를 위해 강제로 'pro' 모드로 설정하여 패턴 계산 (일반/전문가 모두 패턴 표시)
+    return buildCutPlan(plan, PRODUCT_DEFAULTS, { ...rules, mode: "pro" });
+  }, [plan, rules]);
 
   const edgeList = useMemo(() => getEdgeList(plan.polygon.outer), [plan.polygon.outer]);
 
@@ -88,42 +120,37 @@ export default function App() {
       { id: "tShape", label: SHAPE_PRESETS.tShape.label },
       { id: "free", label: "자유형" },
     ],
-    []
+    [],
   );
 
-  const dimensionItems = useMemo(
-    () => {
-      const allItems = edgeList.map((edge) => ({
-        id: edge.id,
-        label: `${edge.fromLabel}–${edge.toLabel}`,
-        lengthMm: edge.lengthMm,
-        startIndex: edge.startIndex,
-        endIndex: edge.endIndex,
-      }));
+  const dimensionItems = useMemo(() => {
+    const allItems = edgeList.map((edge) => ({
+      id: edge.id,
+      label: `${edge.fromLabel}–${edge.toLabel}`,
+      lengthMm: edge.lengthMm,
+      startIndex: edge.startIndex,
+      endIndex: edge.endIndex,
+    }));
 
-      // 원형은 변 길이 입력 자체를 없앰 (반지름으로만 조절)
-      if (shapeType === "circle") {
-        return [];
-      }
+    // 원형은 변 길이 입력 자체를 없앰 (반지름으로만 조절)
+    if (shapeType === "circle") {
+      return [];
+    }
 
-      if (shapeType === "rectangle" && allItems.length === 4) {
-        return allItems.slice(0, 2);
-      }
+    if (shapeType === "rectangle" && allItems.length === 4) {
+      return allItems.slice(0, 2);
+    }
 
-      if (shapeType === "lShape" && allItems.length === 6) {
-        return allItems.filter((_, idx) => idx !== 0 && idx !== 5);
-      }
+    if (shapeType === "lShape" && allItems.length === 6) {
+      return allItems.filter((_, idx) => idx !== 0 && idx !== 5);
+    }
 
-      if (shapeType === "tShape" && allItems.length === 8) {
-        return allItems.filter((_, idx) => idx !== 0 && idx !== 7);
-      }
+    if (shapeType === "tShape" && allItems.length === 8) {
+      return allItems.filter((_, idx) => idx !== 0 && idx !== 7);
+    }
 
-      return allItems;
-    },
-    [edgeList, shapeType]
-  );
-
-
+    return allItems;
+  }, [edgeList, shapeType]);
 
   // --- Gate screen
   if (mode === null) {
@@ -131,15 +158,18 @@ export default function App() {
       <div
         style={{
           minHeight: "100vh",
+          height: "100%",
           display: "flex",
           alignItems: "center",
           justifyContent: "center",
           padding: 24,
+          background: "#e9edf3",
+          boxSizing: "border-box",
         }}
       >
         <div style={{ width: "100%", maxWidth: 720, textAlign: "center" }}>
-          <h1 style={{ margin: "0 0 8px" }}>{t.appTitle}</h1>
-          <p style={{ margin: "0 0 16px", opacity: 0.8 }}>시작 모드를 선택하세요.</p>
+          <h1 style={{ margin: "0 0 8px", color: "#111" }}>{t.appTitle}</h1>
+          <p style={{ margin: "0 0 16px", opacity: 0.8, color: "#333" }}>시작 모드를 선택하세요.</p>
 
           <div
             style={{
@@ -192,7 +222,7 @@ export default function App() {
     updatePolygon,
     addCutout,
     deleteCutout,
-    changeCutout
+    changeCutout,
   } = actions;
 
   // --- Free Drawing Condition
@@ -204,28 +234,47 @@ export default function App() {
   const showFreeDraw = isFreeShape && !isFreeFormClosed;
 
   // DEBUG
-  console.log('[DEBUG App] shapeType:', shapeType, 'isFreeFormClosed:', isFreeFormClosed, 'showFreeDraw:', showFreeDraw, 'outer.length:', plan.polygon.outer.length, 'edgeList.length:', edgeList.length);
+  console.log(
+    "[DEBUG App] shapeType:",
+    shapeType,
+    "isFreeFormClosed:",
+    isFreeFormClosed,
+    "showFreeDraw:",
+    showFreeDraw,
+    "outer.length:",
+    plan.polygon.outer.length,
+    "edgeList.length:",
+    edgeList.length,
+  );
 
   // --- Main screen
   return (
     <div className="app-shell">
-      <header className="app-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+      <header
+        className="app-header"
+        style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}
+      >
+        <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
           <h1>{t.appTitle}</h1>
           <div style={{ fontSize: 14, color: "#555" }}>
             모드: {effectiveMode === "pro" ? "전문가" : "일반"}
           </div>
         </div>
 
-        <div style={{ display: 'flex', gap: 8 }}>
-
-          <button onClick={handleSave} title="브라우저 저장">💾 저장</button>
-          <button onClick={handleImportClick} title="JSON 불러오기">📂 열기</button>
-          <button onClick={handleExport} title="JSON 내려받기">⬇ 내보내기</button>
+        <div style={{ display: "flex", gap: 8 }}>
+          <button onClick={handleSave} title="브라우저 저장">
+            💾 저장
+          </button>
+          <button onClick={handleImportClick} title="JSON 불러오기">
+            📂 열기
+          </button>
+          <button onClick={handleExport} title="JSON 내려받기">
+            ⬇ 내보내기
+          </button>
           <input
             type="file"
             ref={fileInputRef}
-            style={{ display: 'none' }}
+            style={{ display: "none" }}
             accept=".json"
             onChange={handleFileChange}
           />
@@ -275,15 +324,18 @@ export default function App() {
           onChangeCutout={changeCutout}
           attachedEdgeIndices={plan.attachedEdgeIndices}
           onChangeAttachedEdgeIndices={(indices) => {
-            console.log('[DEBUG App] onChangeAttachedEdgeIndices called with:', indices);
+            console.log("[DEBUG App] onChangeAttachedEdgeIndices called with:", indices);
             setPlanAction((prev) => ({ ...prev, attachedEdgeIndices: indices }));
           }}
           fasciaEdgeIndices={plan.fasciaEdgeIndices}
           onChangeFasciaEdgeIndices={(indices) => {
-            console.log('[DEBUG App] onChangeFasciaEdgeIndices called with:', indices);
+            console.log("[DEBUG App] onChangeFasciaEdgeIndices called with:", indices);
             setPlanAction((prev) => ({ ...prev, fasciaEdgeIndices: indices }));
           }}
           allEdges={edgeList}
+          substructureConfig={substructureConfig}
+          onChangeSubstructureConfig={setSubstructureConfig}
+          deckThicknessMm={25}
         />
 
         <section className="canvas-pane">
@@ -314,10 +366,20 @@ export default function App() {
                   }
                   fasciaEdgeIndices={plan.fasciaEdgeIndices ?? []}
                   onToggleViewMode={() =>
-                    setViewMode((prev) => (prev === "deck" ? "substructure" : "deck"))
+                    setViewMode((prev) =>
+                      prev === "deck"
+                        ? "substructure"
+                        : prev === "substructure"
+                          ? "cutPlan"
+                          : "deck",
+                    )
                   }
                   cutoutsMeta={cutoutsMeta}
                   onChangeCutout={changeCutout}
+                  cutPlan={cutPlan}
+                  boardWidthMm={plan.boardWidthMm}
+                  gapMm={5}
+                  deckingDirectionDeg={plan.deckingDirectionDeg}
                 />
               )}
             </div>

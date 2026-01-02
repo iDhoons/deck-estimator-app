@@ -1,0 +1,52 @@
+{
+  "name": "deck-estimator-app",
+  "version": "1.0.0",
+  "private": true,
+  "description": "데크 견적기 - 모노레포 프로젝트",
+  "scripts": {
+    "------- 개발 -------": "",
+    "dev": "npm run build:core && npm run dev:web",
+    "dev:web": "cd apps/web && npm run dev",
+    "------- 빌드 -------": "",
+    "build": "npm run build:core && npm run build:web",
+    "build:core": "cd packages/core && npm run build",
+    "build:web": "cd apps/web && npm run build",
+    "------- 검증 -------": "",
+    "lint": "npm run lint:core && npm run lint:web",
+    "lint:core": "cd packages/core && npm run lint --if-present",
+    "lint:web": "cd apps/web && npm run lint",
+    "typecheck": "npm run typecheck:core && npm run typecheck:web",
+    "typecheck:core": "cd packages/core && tsc -p tsconfig.build.json --noEmit",
+    "typecheck:web": "cd apps/web && tsc --noEmit",
+    "test": "cd packages/core && npm test --if-present",
+    "e2e": "playwright test",
+    "e2e:ui": "playwright test --ui",
+    "e2e:report": "playwright show-report",
+    "------- 유틸리티 -------": "",
+    "clean": "rm -rf packages/core/dist apps/web/dist apps/web/node_modules/.vite",
+    "fresh": "npm run clean && npm run build",
+    "check:exports": "node scripts/check-exports.js",
+    "format": "prettier -w .",
+    "format:check": "prettier -c .",
+    "prepare": "husky"
+  },
+  "lint-staged": {
+    "**/*.{ts,tsx,js,jsx,json,md,yml,yaml,css,scss}": [
+      "prettier -w"
+    ]
+  },
+  "keywords": [
+    "deck",
+    "estimator",
+    "calculator"
+  ],
+  "author": "",
+  "license": "ISC",
+  "devDependencies": {
+    "@playwright/test": "^1.57.0",
+    "husky": "^9.1.7",
+    "lint-staged": "^16.2.7",
+    "prettier": "^3.7.4",
+    "typescript": "^5.9.3"
+  }
+}

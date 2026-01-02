@@ -22,12 +22,12 @@ export const ko = {
   unitPcs: "장",
 
   section: {
-    cutPlan: "컷플랜(전문가 모드)"
+    cutPlan: "컷플랜(전문가 모드)",
   },
   label: {
     row: "행",
     required: "필요 길이",
     stockLen: "원장 길이",
-    offcut: "오프컷(재사용)"
-  }
+    offcut: "오프컷(재사용)",
+  },
 } as const;

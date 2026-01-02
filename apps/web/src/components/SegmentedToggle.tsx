@@ -16,9 +16,7 @@ export function SegmentedToggle<T extends string>({
 }) {
   return (
     <div>
-      {label && (
-        <div style={{ fontSize: 12, opacity: 0.8, marginBottom: 6 }}>{label}</div>
-      )}
+      {label && <div style={{ fontSize: 12, opacity: 0.8, marginBottom: 6 }}>{label}</div>}
 
       <div
         role="radiogroup"

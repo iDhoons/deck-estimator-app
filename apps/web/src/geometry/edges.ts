@@ -17,6 +17,7 @@ export type EdgeHandle = {
 
 export type EdgeInfo = {
   id: string;
+  label: string;
   fromLabel: string;
   toLabel: string;
   lengthMm: number;
@@ -33,7 +34,7 @@ export function collectEdgeHandles(points: PlanPoint[]) {
     const end = points[nextIndex];
     const dx = end.xMm - start.xMm;
     const dy = end.yMm - start.yMm;
-    
+
     if (Math.abs(dx) < EPS && Math.abs(dy) >= EPS) {
       // 수직 변
       const minY = Math.min(start.yMm, end.yMm) - EPS;
@@ -78,7 +79,7 @@ export function collectEdgeHandles(points: PlanPoint[]) {
       // 대각선 변 (수직/수평이 아닌 변) - 이제 핸들 생성
       const length = Math.hypot(dx, dy);
       if (length < EPS) continue;
-      
+
       // 대각선 변의 경우 startIndex와 endIndex만 포함
       handles.push({
         id: `edge-${i}`,
@@ -97,7 +98,7 @@ export function collectEdgeHandles(points: PlanPoint[]) {
 export function computeEdgeLimits(
   points: PlanPoint[],
   vertexIndices: number[],
-  orientation: "horizontal" | "vertical"
+  orientation: "horizontal" | "vertical",
 ) {
   const vertexSet = new Set(vertexIndices);
   const n = points.length;
@@ -143,10 +144,13 @@ export function getEdgeList(points: PlanPoint[]): EdgeInfo[] {
     const to = points[next];
     const dx = to.xMm - from.xMm;
     const dy = to.yMm - from.yMm;
+    const fromLabel = indexToLabel(i);
+    const toLabel = indexToLabel(next);
     edges.push({
       id: `${i}-${next}`,
-      fromLabel: indexToLabel(i),
-      toLabel: indexToLabel(next),
+      label: `${fromLabel}–${toLabel}`,
+      fromLabel,
+      toLabel,
       lengthMm: Math.sqrt(dx * dx + dy * dy),
       startIndex: i,
       endIndex: next,
@@ -159,7 +163,7 @@ export function updateEdgeLength(
   points: PlanPoint[],
   startIndex: number,
   targetLengthMm: number,
-  options?: { minLengthMm?: number }
+  options?: { minLengthMm?: number },
 ) {
   const n = points.length;
   const minLength = options?.minLengthMm ?? MIN_EDGE_LENGTH_MM;
@@ -176,14 +180,14 @@ export function updateEdgeLength(
   if (currentLength < EPS) return null;
 
   const direction = { x: vec.x / currentLength, y: vec.y / currentLength };
-  
+
   // 변의 중점을 기준으로 양쪽으로 확장/축소
   // 목표 길이의 절반만큼 양쪽으로 이동
   const halfDelta = {
-    x: direction.x * (targetLengthMm - currentLength) / 2,
-    y: direction.y * (targetLengthMm - currentLength) / 2,
+    x: (direction.x * (targetLengthMm - currentLength)) / 2,
+    y: (direction.y * (targetLengthMm - currentLength)) / 2,
   };
-  
+
   // 시작점과 끝점만 이동 (중점 기준으로 양쪽으로 확장)
   const updated = points.map((pt, idx) => {
     if (idx === startIndex) {
@@ -193,7 +197,7 @@ export function updateEdgeLength(
     }
     return pt;
   });
-  
+
   // 유효성 검사
   const isValid = (pts: PlanPoint[]) => {
     for (let i = 0; i < pts.length; i++) {
@@ -204,7 +208,7 @@ export function updateEdgeLength(
     }
     return true;
   };
-  
+
   if (isValid(updated)) return updated;
   return null;
 }

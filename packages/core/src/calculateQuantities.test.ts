@@ -1,12 +1,16 @@
 import { describe, it, expect } from "vitest";
-import { readFileSync } from "node:fs";
-import { calculateQuantities } from "./calculateQuantities";
-import type { FasteningMode } from "./types";
+import { readFileSync } from "fs";
+import { fileURLToPath } from "url";
+import { dirname, join } from "path";
+import { calculateQuantities } from "./calculateQuantities.js";
+import type { FasteningMode } from "./types.js";
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
 
 function loadFixture(name: string) {
-  return JSON.parse(
-    readFileSync(new URL(`../fixtures/${name}.json`, import.meta.url), "utf-8")
-  );
+  const path = join(__dirname, `../fixtures/${name}.json`);
+  return JSON.parse(readFileSync(path, "utf-8"));
 }
 
 describe("calculateQuantities (fixtures)", () => {
@@ -16,7 +20,7 @@ describe("calculateQuantities (fixtures)", () => {
     { fixture: "rect-2000x1000-rot90", mode: "clip" },
     { fixture: "rect-2000x1000-rot90", mode: "screw" },
     { fixture: "rect-2000x1000-with-stairs", mode: "clip" },
-    { fixture: "rect-2000x1000-with-stairs", mode: "screw" }
+    { fixture: "rect-2000x1000-with-stairs", mode: "screw" },
   ];
 
   for (const c of cases) {

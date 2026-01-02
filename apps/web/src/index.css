@@ -13,13 +13,21 @@ body {
   margin: 0;
   background: #e9edf3;
   color: #111;
-  font-family: system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif;
+  font-family:
+    system-ui,
+    -apple-system,
+    Segoe UI,
+    Roboto,
+    Helvetica,
+    Arial,
+    sans-serif;
   overflow: hidden;
 }
 
 #root {
   height: 100%;
   width: 100%;
+  min-height: 100vh;
 }
 
 .app-shell {
@@ -128,7 +136,7 @@ body {
     flex: 1;
     border-radius: 16px 16px 0 0; /* Slightly different look for bottom sheet feel maybe? */
     /* Ensure it doesn't get too small */
-    min-height: 200px; 
+    min-height: 200px;
   }
 
   .app-header {
@@ -273,4 +281,33 @@ body {
     grid-row: 2;
     max-height: 45vh;
   }
+}
+
+/* 데크재 드롭다운 스타일 */
+.decking-select {
+  width: 100%;
+  padding: 8px 6px;
+  border-radius: 8px;
+  border: 1px solid transparent; /* 평소에는 투명 */
+  background: #f6f7fb;
+  font-size: 13px;
+  /* 런타임 증거: computed color=white + colorScheme=dark로 텍스트가 안 보임 → 라이트 폼 컨트롤로 강제 */
+  color: #111;
+  -webkit-text-fill-color: #111;
+  color-scheme: light;
+  outline: none;
+  cursor: pointer;
+  transition:
+    border-color 0.15s,
+    background 0.15s;
+}
+
+.decking-select:hover {
+  border-color: #ccc;
+  background: #fff;
+}
+
+.decking-select:focus {
+  border-color: #4caf50;
+  background: #fff;
 }

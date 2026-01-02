@@ -10,7 +10,7 @@ import type { Point, Polygon, LineSegment } from "./types";
 export function pointToSegmentDistance(
   px: number,
   py: number,
-  seg: { x1: number; y1: number; x2: number; y2: number }
+  seg: { x1: number; y1: number; x2: number; y2: number },
 ): number {
   const vx = seg.x2 - seg.x1;
   const vy = seg.y2 - seg.y1;
@@ -29,16 +29,17 @@ export function degToRad(deg: number): number {
 }
 
 export function rotatePoint(p: Point, rad: number): Point {
-  const c = Math.cos(rad), s = Math.sin(rad);
+  const c = Math.cos(rad),
+    s = Math.sin(rad);
   return { xMm: p.xMm * c - p.yMm * s, yMm: p.xMm * s + p.yMm * c };
 }
 
 export function rotatePolygon(poly: Polygon, rad: number): Polygon {
   return {
-    outer: poly.outer.map(p => rotatePoint(p, rad)),
+    outer: poly.outer.map((p) => rotatePoint(p, rad)),
     holes: poly.holes
       ?.filter((h): h is Point[] => h != null && Array.isArray(h) && h.length > 0)
-      .map(h => h.map(p => rotatePoint(p, rad)))
+      .map((h) => h.map((p) => rotatePoint(p, rad))),
   };
 }
 
@@ -69,7 +70,10 @@ export function polygonAreaMm2(poly: Polygon): number {
 }
 
 export function bbox(points: Point[]) {
-  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  let minX = Infinity,
+    minY = Infinity,
+    maxX = -Infinity,
+    maxY = -Infinity;
   for (const p of points) {
     if (p.xMm < minX) minX = p.xMm;
     if (p.yMm < minY) minY = p.yMm;
@@ -133,12 +137,12 @@ export function polygonSpanAtY(poly: Polygon, y: number): number {
 
 /** x=const에서 Polygon span(mm) : 계산 편의상 x/y를 스왑해 reuse */
 export function polygonSpanAtX(poly: Polygon, x: number): number {
-  const swap = (ring: Point[]) => ring.map(p => ({ xMm: p.yMm, yMm: p.xMm }));
+  const swap = (ring: Point[]) => ring.map((p) => ({ xMm: p.yMm, yMm: p.xMm }));
   const swapped: Polygon = {
     outer: swap(poly.outer),
     holes: poly.holes
       ?.filter((h): h is Point[] => h != null && Array.isArray(h) && h.length > 0)
-      .map(swap)
+      .map(swap),
   };
   return polygonSpanAtY(swapped, x);
 }
@@ -173,89 +177,107 @@ export function isPointInPolygon(p: Point, poly: Polygon): boolean {
   return true;
 }
 
-
 /**
  * 특정 간격으로 그리드 라인을 생성하고, 다각형 내부에 포함된 선분들만 반환
  * axis: 'x' -> 수직선 (x=const), 'y' -> 수평선 (y=const)
+ * startFromEdge: true이면 최대 간격 기반 균등 배치 (외곽 멍에가 있을 때 사용)
+ *   - spacingMm을 최대 허용 간격으로 사용
+ *   - 양쪽 외곽 사이를 균등 분할하여 내부 멍에를 대칭 배치
  */
 export function getClippedGridLines(
   poly: Polygon,
   spacingMm: number,
-  axis: "x" | "y"
+  axis: "x" | "y",
+  startFromEdge: boolean = false,
 ): LineSegment[] {
   const bb = bbox(poly.outer);
   const min = axis === "x" ? bb.minX : bb.minY;
   const max = axis === "x" ? bb.maxX : bb.maxY;
 
   const eps = 0.5;
-
-  // Start from center and distribute symmetrically
-  const center = (min + max) / 2;
   const range = max - min;
-  const numLines = Math.floor(range / spacingMm);
 
-  // Calculate starting position to make it symmetric
-  const totalSpan = numLines * spacingMm;
-  let pos = center - totalSpan / 2 + eps;
+  let pos: number;
+  let stepSize: number;
+  let endCondition: (p: number) => boolean;
+
+  if (startFromEdge) {
+    // 최대 간격 기반 균등 배치:
+    // - spacingMm을 최대 허용 간격으로 사용
+    // - 양쪽 외곽 사이 거리를 균등 분할하여 대칭 배치
+    const numSpans = Math.ceil(range / spacingMm); // 최소 필요 구간 수
+    const actualSpacing = range / numSpans; // 실제 균등 간격
+    pos = min + actualSpacing; // 첫 번째 내부 위치
+    stepSize = actualSpacing;
+    endCondition = (p) => p < max - actualSpacing * 0.5; // 외곽 근처 제외
+  } else {
+    // 기존 로직: 중앙 기준 대칭 배치
+    const center = (min + max) / 2;
+    const numLines = Math.floor(range / spacingMm);
+    const totalSpan = numLines * spacingMm;
+    pos = center - totalSpan / 2 + eps;
+    stepSize = spacingMm;
+    endCondition = (p) => p <= max - eps;
+  }
 
   const segments: LineSegment[] = [];
 
-  while (pos <= max - eps) {
+  while (endCondition(pos)) {
     let intersectionPoints: number[] = [];
-    
+
     if (axis === "y") {
       // 수평선 (y=const)
       intersectionPoints = intersectionsWithHorizontalScan(poly.outer, pos);
     } else {
-       // 수직선 (x=const) -> Y좌표 교차점 구하기 위해 스왑
-       const swap = (ring: Point[]) => ring.map(p => ({ xMm: p.yMm, yMm: p.xMm }));
-       const swappedOuter = swap(poly.outer);
-       intersectionPoints = intersectionsWithHorizontalScan(swappedOuter, pos);
+      // 수직선 (x=const) -> Y좌표 교차점 구하기 위해 스왑
+      const swap = (ring: Point[]) => ring.map((p) => ({ xMm: p.yMm, yMm: p.xMm }));
+      const swappedOuter = swap(poly.outer);
+      intersectionPoints = intersectionsWithHorizontalScan(swappedOuter, pos);
     }
-    
+
     // 구간별 Hole 처리
     for (let i = 0; i + 1 < intersectionPoints.length; i += 2) {
       const start = intersectionPoints[i];
-      const end = intersectionPoints[i+1];
-      
-      let currentSegments = [{s: start, e: end}];
-      
+      const end = intersectionPoints[i + 1];
+
+      let currentSegments = [{ s: start, e: end }];
+
       if (poly.holes && poly.holes.length > 0) {
         for (const hole of poly.holes) {
           if (!hole || !Array.isArray(hole) || hole.length === 0) continue;
-          const holeRing = axis === "x" ? hole.map(p => ({ xMm: p.yMm, yMm: p.xMm })) : hole;
+          const holeRing = axis === "x" ? hole.map((p) => ({ xMm: p.yMm, yMm: p.xMm })) : hole;
           const holeIntersections = intersectionsWithHorizontalScan(holeRing, pos);
-          
+
           for (let h = 0; h + 1 < holeIntersections.length; h += 2) {
-             const hStart = holeIntersections[h];
-             const hEnd = holeIntersections[h+1];
-             
-             const nextSegments: { s: number; e: number }[] = [];
-             for (const seg of currentSegments) {
-                // seg: [s, e], hole: [hs, he]
-                if (seg.e <= hStart || seg.s >= hEnd) {
-                   nextSegments.push(seg);
-                } else {
-                   if (seg.s < hStart) nextSegments.push({ s: seg.s, e: hStart });
-                   if (seg.e > hEnd) nextSegments.push({ s: hEnd, e: seg.e });
-                }
-             }
-             currentSegments = nextSegments;
+            const hStart = holeIntersections[h];
+            const hEnd = holeIntersections[h + 1];
+
+            const nextSegments: { s: number; e: number }[] = [];
+            for (const seg of currentSegments) {
+              // seg: [s, e], hole: [hs, he]
+              if (seg.e <= hStart || seg.s >= hEnd) {
+                nextSegments.push(seg);
+              } else {
+                if (seg.s < hStart) nextSegments.push({ s: seg.s, e: hStart });
+                if (seg.e > hEnd) nextSegments.push({ s: hEnd, e: seg.e });
+              }
+            }
+            currentSegments = nextSegments;
           }
         }
       }
-      
+
       for (const seg of currentSegments) {
-         if (axis === "y") {
-            segments.push({ x1: seg.s, y1: pos, x2: seg.e, y2: pos });
-         } else {
-            segments.push({ x1: pos, y1: seg.s, x2: pos, y2: seg.e });
-         }
+        if (axis === "y") {
+          segments.push({ x1: seg.s, y1: pos, x2: seg.e, y2: pos });
+        } else {
+          segments.push({ x1: pos, y1: seg.s, x2: pos, y2: seg.e });
+        }
       }
     }
 
-    pos += spacingMm;
+    pos += stepSize;
   }
-  
+
   return segments;
 }

@@ -6,7 +6,7 @@ export function fitPointsToViewport(
   points: PlanPoint[],
   viewport: { width: number; height: number },
   center: { x: number; y: number },
-  fraction = 0.5
+  fraction = 0.5,
 ) {
   if (points.length === 0) return points;
   let minX = Infinity;

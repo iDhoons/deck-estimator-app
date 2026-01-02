@@ -1,0 +1,49 @@
+#!/bin/sh
+
+echo "🔍 Pre-commit 검증 시작..."
+
+# 0. Staged 파일 자동 포맷(Prettier)
+echo "✨ 포맷팅(Prettier) + 재스테이징..."
+npx lint-staged
+if [ $? -ne 0 ]; then
+    echo "❌ 포맷팅 실패! 커밋 중단."
+    exit 1
+fi
+
+# 1. Core 패키지 export 검증
+echo "📦 Core 모듈 export 검증..."
+node scripts/check-exports.js
+if [ $? -ne 0 ]; then
+    echo "❌ Core 모듈 export 검증 실패!"
+    exit 1
+fi
+
+# 2. Core 패키지 변경 감지 시 빌드 검증
+if git diff --cached --name-only | grep -q "packages/core/src"; then
+    echo "🔨 Core 패키지 변경 감지 - 빌드 검증..."
+    cd packages/core && npm run build
+    if [ $? -ne 0 ]; then
+        echo "❌ Core 빌드 실패! 커밋 중단."
+        exit 1
+    fi
+    cd ../..
+fi
+
+# 3. TypeScript 타입 체크
+echo "📝 TypeScript 타입 검사..."
+npm run typecheck
+if [ $? -ne 0 ]; then
+    echo "❌ TypeScript 에러 발견! 커밋 중단."
+    exit 1
+fi
+
+# 4. 테스트 실행 (스냅샷 검증)
+echo "🧪 테스트(스냅샷) 검증..."
+npm test
+if [ $? -ne 0 ]; then
+    echo "❌ 테스트 실패! 로직이 변경되었거나 스냅샷이 일치하지 않습니다."
+    echo "   의도적인 변경이라면 'npm test -- -u' 명령어로 스냅샷을 업데이트하세요."
+    exit 1
+fi
+
+echo "✅ Pre-commit 검증 완료!"

@@ -4,7 +4,7 @@
   "secondarySpacingMm": 400,
   "primarySpacingMm": 600,
   "anchorSpacingMm": 1000,
-  "footingSpacingMm": 1000,
+  "footingSpacingMm": 1800,
   "consumerLoss": {
     "base": 0.03,
     "vertexFactor": 0.003,
@@ -13,5 +13,28 @@
   },
   "screwPerIntersection": 2,
   "showAdvancedOverrides": false,
-  "enableCutPlan": false
+  "enableCutPlan": false,
+  "substructure": {
+    "bearerSpec": {
+      "widthMm": 100,
+      "heightMm": 100,
+      "thicknessMm": 1.6,
+      "stockLengthMm": 6000
+    },
+    "joistSpec": {
+      "widthMm": 50,
+      "heightMm": 50,
+      "thicknessMm": 1.6,
+      "stockLengthMm": 6000
+    },
+    "postSpec": {
+      "widthMm": 100,
+      "heightMm": 100,
+      "thicknessMm": 1.6,
+      "stockLengthMm": 6000
+    },
+    "foundationType": "concrete_block",
+    "stockLengthMm": 6000,
+    "lossRate": 0.05
+  }
 }

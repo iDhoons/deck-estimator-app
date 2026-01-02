@@ -1,0 +1,54 @@
+version: 2
+updates:
+  # Root (tooling: husky, prettier, playwright, typescript, lint-staged 등)
+  - package-ecosystem: "npm"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "09:00"
+      timezone: "Asia/Seoul"
+    open-pull-requests-limit: 5
+    groups:
+      root-dev-deps:
+        dependency-type: "development"
+        update-types:
+          - "minor"
+          - "patch"
+
+  # Core package (@deck/core)
+  - package-ecosystem: "npm"
+    directory: "/packages/core"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "09:10"
+      timezone: "Asia/Seoul"
+    open-pull-requests-limit: 5
+    groups:
+      core-dev-deps:
+        dependency-type: "development"
+        update-types:
+          - "minor"
+          - "patch"
+
+  # Web app (React/Vite)
+  - package-ecosystem: "npm"
+    directory: "/apps/web"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "09:20"
+      timezone: "Asia/Seoul"
+    open-pull-requests-limit: 10
+    groups:
+      web-dev-deps:
+        dependency-type: "development"
+        update-types:
+          - "minor"
+          - "patch"
+      web-prod-deps:
+        dependency-type: "production"
+        update-types:
+          - "minor"
+          - "patch"

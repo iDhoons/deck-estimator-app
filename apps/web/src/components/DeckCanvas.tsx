@@ -9,7 +9,7 @@ import {
 import { useCanvasViewport } from "../hooks/useCanvasViewport";
 import { useDeckGeometry } from "../hooks/useDeckGeometry";
 import { useUndoRedo } from "../hooks/useUndoRedo";
-import type { Polygon, StructureLayout } from "@deck/core";
+import type { Polygon, StructureLayout, CutPlan } from "@deck/core";
 import {
   collectEdgeHandles,
   computeEdgeLimits,
@@ -17,10 +17,7 @@ import {
   MIN_EDGE_SPAN_MM,
   type EdgeHandle,
 } from "../geometry/edges";
-import {
-  isPointInsidePolygon,
-  polygonCentroid,
-} from "../geometry/polygon";
+import { isPointInsidePolygon, polygonCentroid } from "../geometry/polygon";
 import { circleSegmentsForSagitta } from "../geometry/shapes";
 import type { CutoutMeta } from "../geometry/cutouts";
 
@@ -29,16 +26,19 @@ import { DeckVertexHandles } from "./deck-canvas/DeckVertexHandles";
 import { DeckEdgeControls } from "./deck-canvas/DeckEdgeControls";
 import { DeckHoles } from "./deck-canvas/DeckHoles";
 import { DeckHoleEdgeHandles } from "./deck-canvas/DeckHoleEdgeHandles";
+import { DeckBoardPattern } from "./deck-canvas/DeckBoardPattern";
 import {
   CanvasControlsCenter,
   CanvasControlsTopLeft,
   CanvasControlsBottomLeft,
   CanvasControlsBottomRight,
+  CANVAS_CONTROLS_STYLE,
 } from "./CanvasControls";
 
 import type { ShapeType, CutoutShape } from "../types";
+import { buildLengthLegend } from "../utils/cutPlanViz";
 
-export type ViewMode = "deck" | "substructure";
+export type ViewMode = "deck" | "substructure" | "cutPlan";
 type PlanPoint = { xMm: number; yMm: number };
 
 type CutoutMode = { enabled: boolean; shape: CutoutShape };
@@ -49,8 +49,8 @@ const EDGE_DRAG_SPEED_FACTOR = 0.5; // 변 드래그 속도 조절 (1.0 = 원래
 
 // 모든 도형의 시각적 설정을 한 곳에서 관리 (직사각형 기준)
 const POLYGON_STYLE = {
-  stroke: "#5af",
-  strokeWidth: { normal: 4, subView: 2 },
+  stroke: "#000",
+  strokeWidth: { normal: 2, hover: 4, subView: 2 },
   strokeLinejoin: "miter" as const,
   strokeLinecap: "square" as const,
   fill: {
@@ -63,31 +63,31 @@ const POLYGON_STYLE = {
 
 // polygon의 점 개수와 패턴으로 도형 타입 판단
 
-
-
-
-
-
 export function DeckCanvas({
   polygon,
   viewMode,
   onChangePolygon,
   structureLayout,
   shapeType,
+  onChangeShapeType,
   attachedEdgeIndices,
   onChangeAttachedEdgeIndices,
   fasciaEdgeIndices,
   onToggleViewMode,
   cutoutMode,
-  onChangeCutoutMode,
   cutoutsMeta,
   onChangeCutout,
+  cutPlan,
+  boardWidthMm = 140,
+  gapMm = 5,
+  deckingDirectionDeg = 0,
 }: {
   polygon: Polygon;
   viewMode: ViewMode;
   onChangePolygon?: (polygon: Polygon) => void;
   structureLayout?: StructureLayout;
   shapeType?: ShapeType;
+  onChangeShapeType?: (shapeType: ShapeType) => void;
   attachedEdgeIndices?: number[];
   onChangeAttachedEdgeIndices?: (next: number[]) => void;
   fasciaEdgeIndices?: number[];
@@ -96,6 +96,10 @@ export function DeckCanvas({
   onChangeCutoutMode?: (next: CutoutMode) => void;
   cutoutsMeta?: CutoutMeta[];
   onChangeCutout?: (index: number, meta: CutoutMeta) => void;
+  cutPlan?: CutPlan | null;
+  boardWidthMm?: number;
+  gapMm?: number;
+  deckingDirectionDeg?: number;
 }) {
   const svgRef = useRef<SVGSVGElement | null>(null);
   const pointerIdRef = useRef<number | null>(null);
@@ -116,9 +120,11 @@ export function DeckCanvas({
     handleWheel,
   } = useCanvasViewport(svgRef, {
     initialViewBox: { x: 0, y: 0, w: VIEWBOX.width, h: VIEWBOX.height },
-  }); const [hoverEdgeId, setHoverEdgeId] = useState<string | null>(null);
+  });
+  const [hoverEdgeId, setHoverEdgeId] = useState<string | null>(null);
   const [activeEdgeId, setActiveEdgeId] = useState<string | null>(null);
   const [isEdgeDragging, setIsEdgeDragging] = useState(false);
+  const [isPolygonHovered, setIsPolygonHovered] = useState(false);
   const [activeTool, setActiveTool] = useState<"add" | "delete" | "wall" | "cutout" | null>(null);
   const [hoverAddEdgeIndex, setHoverAddEdgeIndex] = useState<number | null>(null);
   const [hoverAddPoint, setHoverAddPoint] = useState<{ x: number; y: number } | null>(null);
@@ -127,7 +133,11 @@ export function DeckCanvas({
   const [selectedHoleIndex, setSelectedHoleIndex] = useState<number | null>(null);
   const [hoverHoleIndex, setHoverHoleIndex] = useState<number | null>(null);
   const [isHoleMoving, setIsHoleMoving] = useState(false);
-  const holeVertexDragRef = useRef<{ pointerId: number; holeIndex: number; vertexIndex: number } | null>(null);
+  const holeVertexDragRef = useRef<{
+    pointerId: number;
+    holeIndex: number;
+    vertexIndex: number;
+  } | null>(null);
   const holeMoveDragRef = useRef<{
     pointerId: number;
     holeIndex: number;
@@ -152,7 +162,11 @@ export function DeckCanvas({
     startWorld: { x: number; y: number };
     startMeta: { xMm: number; yMm: number; widthMm: number; heightMm: number; shape: CutoutShape };
   } | null>(null);
-  const cutoutDragRef = useRef<{ pointerId: number; shape: Exclude<CutoutShape, "free">; startWorld: { x: number; y: number } } | null>(null);
+  const cutoutDragRef = useRef<{
+    pointerId: number;
+    shape: Exclude<CutoutShape, "free">;
+    startWorld: { x: number; y: number };
+  } | null>(null);
   const [draftCutoutPoints, setDraftCutoutPoints] = useState<PlanPoint[] | null>(null);
 
   // Sync cutout mode from parent (ControlsPanel/App)
@@ -168,19 +182,18 @@ export function DeckCanvas({
   }, [cutoutMode, cutoutMode?.enabled, cutoutMode?.shape]);
 
   // Undo/Redo history management
-  const { undo: handleUndo, redo: handleRedo, canUndo, canRedo } = useUndoRedo(
-    polygon,
-    onChangePolygon ?? (() => { }),
-    { isEqual: (a, b) => JSON.stringify(a) === JSON.stringify(b) }
-  );
+  const {
+    undo: handleUndo,
+    redo: handleRedo,
+    canUndo,
+    canRedo,
+    pause: pauseHistory,
+    commit: commitHistory,
+  } = useUndoRedo(polygon, onChangePolygon ?? (() => {}), {
+    isEqual: (a, b) => JSON.stringify(a) === JSON.stringify(b),
+  });
 
   // Replaced manual history logic with useUndoRedo
-
-
-
-
-
-
 
   const edgeDragRef = useRef<{
     pointerId: number;
@@ -192,7 +205,6 @@ export function DeckCanvas({
     limits: { minDelta: number; maxDelta: number };
   } | null>(null);
   const circleDragActiveRef = useRef(false);
-  const [isCircleOutlineHovered, setIsCircleOutlineHovered] = useState(false);
   const circleRadiusDragRef = useRef<{
     pointerId: number;
     center: { x: number; y: number };
@@ -207,7 +219,11 @@ export function DeckCanvas({
   } | null>(null);
 
   // Utility: polygon의 점 개수와 패턴으로 도형 타입 판단
-  const detectShapeInfo = (points: { xMm: number; yMm: number }[], _isClosed: boolean, shapeType?: ShapeType) => {
+  const detectShapeInfo = (
+    points: { xMm: number; yMm: number }[],
+    _isClosed: boolean,
+    shapeType?: ShapeType,
+  ) => {
     if (shapeType === "circle") {
       return { isFree: false, isClosed: true, hasEdgeControls: false };
     }
@@ -226,7 +242,7 @@ export function DeckCanvas({
   const projectPointToSegment = (
     point: { x: number; y: number },
     a: { x: number; y: number },
-    b: { x: number; y: number }
+    b: { x: number; y: number },
   ) => {
     const ab = { x: b.x - a.x, y: b.y - a.y };
     const abLenSq = ab.x * ab.x + ab.y * ab.y;
@@ -237,6 +253,15 @@ export function DeckCanvas({
 
   const isEditable = typeof onChangePolygon === "function";
   const isSubView = viewMode === "substructure";
+  const isCutPlanView = viewMode === "cutPlan";
+
+  const nextViewMode: ViewMode =
+    viewMode === "deck" ? "substructure" : viewMode === "substructure" ? "cutPlan" : "deck";
+  const viewModeLabel: Record<ViewMode, string> = {
+    deck: "데크 보기",
+    substructure: "하부 구조",
+    cutPlan: "재단 계획",
+  };
 
   // polygon 기반으로 도형 정보 판단
   const shapeInfo = useMemo(() => {
@@ -244,10 +269,13 @@ export function DeckCanvas({
     return info;
   }, [polygon.outer, shapeType]);
 
+  const cutPlanLegend = useMemo(() => {
+    if (!isCutPlanView || !cutPlan) return null;
+    return buildLengthLegend(cutPlan, 1000);
+  }, [cutPlan, isCutPlanView]);
+
   // 프리셋 도형에서만 변 드래그 가능
   const enableEdgeControls = isEditable && shapeInfo.hasEdgeControls;
-
-
 
   const centerView = useCallback(() => {
     // Calculate polygon bounding box
@@ -281,13 +309,22 @@ export function DeckCanvas({
     });
   }, [polygon.outer, baseCenterView]);
 
+  const handleClear = useCallback(() => {
+    if (!onChangePolygon) return;
+    onChangePolygon({ outer: [], holes: [] });
+    setActiveTool(null);
+  }, [onChangePolygon]);
+
   const controls = [
-    { key: "rotate", label: "회전", onClick: () => setRotation((prev) => (prev + 15) % 360) },
+    { key: "rotate", label: "회전", onClick: () => setRotation((prev) => (prev + 90) % 360) },
     { key: "center", label: "중앙 맞추기", onClick: centerView },
-    { key: "zoom-out", label: "축소", onClick: () => setScale((prev) => Math.max(0.2, prev * 0.9)) },
+    {
+      key: "zoom-out",
+      label: "축소",
+      onClick: () => setScale((prev) => Math.max(0.2, prev * 0.9)),
+    },
     { key: "zoom-in", label: "확대", onClick: () => setScale((prev) => Math.min(5, prev * 1.1)) },
   ];
-
 
   // SVG 실제 픽셀 크기 추적 (텍스트 픽셀 고정의 원인 파악/계산용)
   useEffect(() => {
@@ -320,11 +357,12 @@ export function DeckCanvas({
   }, [svgPxSize.w, svgPxSize.h, viewBox.w, viewBox.h]);
 
   // 현재 상태에서 "픽셀 고정"을 하려면 fontSize(user unit)가 얼마여야 하는지 (진단용)
-  const suggestedEdgeFontUser = useMemo(() => 20 / pixelsPerUnit, [pixelsPerUnit]);
+  const suggestedEdgeFontUser = useMemo(() => 24 / pixelsPerUnit, [pixelsPerUnit]);
 
-
-
-  const isCircle = useMemo(() => shapeType === "circle" && polygon.outer.length >= 3, [shapeType, polygon.outer.length]);
+  const isCircle = useMemo(
+    () => shapeType === "circle" && polygon.outer.length >= 3,
+    [shapeType, polygon.outer.length],
+  );
   const circleCenter = useMemo(() => {
     if (!isCircle) return null;
     const c = polygonCentroid(polygon.outer);
@@ -336,29 +374,35 @@ export function DeckCanvas({
     const pts = polygon.outer;
     if (pts.length === 0) return null;
     // 평균 반지름(노이즈에 조금 더 강함)
-    const sum = pts.reduce((acc, p) => acc + Math.hypot(p.xMm - circleCenter.x, p.yMm - circleCenter.y), 0);
+    const sum = pts.reduce(
+      (acc, p) => acc + Math.hypot(p.xMm - circleCenter.x, p.yMm - circleCenter.y),
+      0,
+    );
     return sum / pts.length;
   }, [isCircle, circleCenter, polygon.outer]);
 
   // 원 반지름 드래그 속도 계수 (커서 이동 대비 반지름 변화 비율). 값이 작을수록 천천히 변함.
   const CIRCLE_RADIUS_DRAG_SPEED = 0.35;
 
-  const buildCirclePolygon = useCallback((center: { x: number; y: number }, radiusMm: number, segments = 16) => {
-    const pts: { xMm: number; yMm: number }[] = [];
-    const r = Math.max(radiusMm, 0);
-    for (let i = 0; i < segments; i++) {
-      const a = (i / segments) * Math.PI * 2;
-      pts.push({ xMm: center.x + Math.cos(a) * r, yMm: center.y + Math.sin(a) * r });
-    }
-    return pts;
-  }, []);
+  const buildCirclePolygon = useCallback(
+    (center: { x: number; y: number }, radiusMm: number, segments = 16) => {
+      const pts: { xMm: number; yMm: number }[] = [];
+      const r = Math.max(radiusMm, 0);
+      for (let i = 0; i < segments; i++) {
+        const a = (i / segments) * Math.PI * 2;
+        pts.push({ xMm: center.x + Math.cos(a) * r, yMm: center.y + Math.sin(a) * r });
+      }
+      return pts;
+    },
+    [],
+  );
 
   const isPointInsideOuter = useCallback(
     (p: PlanPoint) => {
       if (polygon.outer.length < 3) return false;
       return isPointInsidePolygon({ x: p.xMm, y: p.yMm }, polygon.outer);
     },
-    [polygon.outer]
+    [polygon.outer],
   );
 
   const appendHole = useCallback(
@@ -371,7 +415,7 @@ export function DeckCanvas({
       onChangePolygon({ ...polygon, holes: nextHoles });
       setSelectedHoleIndex(nextHoles.length - 1);
     },
-    [isPointInsideOuter, onChangePolygon, polygon]
+    [isPointInsideOuter, onChangePolygon, polygon],
   );
 
   const updateHolePoint = useCallback(
@@ -386,7 +430,7 @@ export function DeckCanvas({
       const nextHoles = holes.map((h, i) => (i === holeIndex ? nextHole : h));
       onChangePolygon({ ...polygon, holes: nextHoles });
     },
-    [isPointInsideOuter, onChangePolygon, polygon]
+    [isPointInsideOuter, onChangePolygon, polygon],
   );
 
   const edgeHandles = useMemo(() => {
@@ -394,27 +438,9 @@ export function DeckCanvas({
     return collectEdgeHandles(polygon.outer);
   }, [enableEdgeControls, polygon.outer]);
 
-
-
-  const addHandles = useMemo(() => {
-    if (!isEditable || activeTool !== "add") return [];
-    if (hoverAddEdgeIndex === null || !hoverAddPoint) return [];
-    const pts = polygon.outer;
-    if (pts.length < 2) return [];
-    const i = hoverAddEdgeIndex % pts.length;
-    const nextIndex = (i + 1) % pts.length;
-    // 새 점은 i번째 점과 nextIndex번째 점 사이에 삽입
-    // nextIndex가 0이면 마지막 점과 첫 점 사이이므로 배열 끝에 추가
-    // 그렇지 않으면 nextIndex 위치에 삽입
-    const insertIndex = nextIndex === 0 ? pts.length : nextIndex;
-    return [{ id: `add-handle-${i}`, insertIndex, position: hoverAddPoint }];
-  }, [activeTool, hoverAddEdgeIndex, hoverAddPoint, isEditable, polygon.outer]);
-
   const { edgeLabels, areaM2 } = useDeckGeometry(polygon);
 
-
   // 텍스트 위치를 transformGroup과 동일하게 변환하는 함수
-
 
   const handlePointerMove = useCallback(
     (event: ReactPointerEvent<SVGSVGElement>) => {
@@ -465,20 +491,20 @@ export function DeckCanvas({
         const { fixedCorner } = drag;
 
         // Snap current position to grid
-        let snappedX = Math.round(world.x / EDGE_LENGTH_STEP_MM) * EDGE_LENGTH_STEP_MM;
-        let snappedY = Math.round(world.y / EDGE_LENGTH_STEP_MM) * EDGE_LENGTH_STEP_MM;
+        const snappedX = Math.round(world.x / EDGE_LENGTH_STEP_MM) * EDGE_LENGTH_STEP_MM;
+        const snappedY = Math.round(world.y / EDGE_LENGTH_STEP_MM) * EDGE_LENGTH_STEP_MM;
 
         // Calculate new dimensions based on fixed corner and current position
-        let newWidthMm = Math.abs(snappedX - fixedCorner.x);
-        let newHeightMm = Math.abs(snappedY - fixedCorner.y);
+        const newWidthMm = Math.abs(snappedX - fixedCorner.x);
+        const newHeightMm = Math.abs(snappedY - fixedCorner.y);
 
         // Ensure minimum size
-        let finalWidthMm = Math.max(MIN_EDGE_SPAN_MM, newWidthMm);
-        let finalHeightMm = Math.max(MIN_EDGE_SPAN_MM, newHeightMm);
+        const finalWidthMm = Math.max(MIN_EDGE_SPAN_MM, newWidthMm);
+        const finalHeightMm = Math.max(MIN_EDGE_SPAN_MM, newHeightMm);
 
         // Calculate new center position (midpoint between fixed corner and current position)
-        let newXMm = (fixedCorner.x + snappedX) / 2;
-        let newYMm = (fixedCorner.y + snappedY) / 2;
+        const newXMm = (fixedCorner.x + snappedX) / 2;
+        const newYMm = (fixedCorner.y + snappedY) / 2;
 
         // For circle, keep width and height equal (use the larger dimension)
         let finalW = finalWidthMm;
@@ -500,7 +526,7 @@ export function DeckCanvas({
         ];
 
         const allCornersInside = corners.every((corner) =>
-          isPointInsidePolygon(corner, polygon.outer)
+          isPointInsidePolygon(corner, polygon.outer),
         );
 
         // Only apply the change if all corners are inside
@@ -585,7 +611,7 @@ export function DeckCanvas({
         ];
 
         const allCornersInside = corners.every((corner) =>
-          isPointInsidePolygon(corner, polygon.outer)
+          isPointInsidePolygon(corner, polygon.outer),
         );
 
         // Only apply the change if all corners are inside
@@ -609,7 +635,12 @@ export function DeckCanvas({
         if (!world) return;
 
         // Safety check: ensure we have valid hole data
-        if (!drag.lastValidHole || drag.lastValidHole.length === 0 || !drag.startHole || drag.startHole.length === 0) {
+        if (
+          !drag.lastValidHole ||
+          drag.lastValidHole.length === 0 ||
+          !drag.startHole ||
+          drag.startHole.length === 0
+        ) {
           return;
         }
 
@@ -622,11 +653,14 @@ export function DeckCanvas({
         const currentDy = totalDy - (drag.lastValidHole[0].yMm - drag.startHole[0].yMm);
 
         // Try to move from the last valid position
-        const movedHole = drag.lastValidHole.map((p) => ({ xMm: p.xMm + currentDx, yMm: p.yMm + currentDy }));
+        const movedHole = drag.lastValidHole.map((p) => ({
+          xMm: p.xMm + currentDx,
+          yMm: p.yMm + currentDy,
+        }));
 
         // Check if all points are inside
         const allInside = movedHole.every((p) =>
-          isPointInsidePolygon({ x: p.xMm, y: p.yMm }, polygon.outer)
+          isPointInsidePolygon({ x: p.xMm, y: p.yMm }, polygon.outer),
         );
 
         let finalHole = drag.lastValidHole;
@@ -648,13 +682,13 @@ export function DeckCanvas({
           // Try moving X only from last valid position
           const movedX = drag.lastValidHole.map((p) => ({ xMm: p.xMm + currentDx, yMm: p.yMm }));
           const xValid = movedX.every((p) =>
-            isPointInsidePolygon({ x: p.xMm, y: p.yMm }, polygon.outer)
+            isPointInsidePolygon({ x: p.xMm, y: p.yMm }, polygon.outer),
           );
 
           // Try moving Y only from last valid position
           const movedY = drag.lastValidHole.map((p) => ({ xMm: p.xMm, yMm: p.yMm + currentDy }));
           const yValid = movedY.every((p) =>
-            isPointInsidePolygon({ x: p.xMm, y: p.yMm }, polygon.outer)
+            isPointInsidePolygon({ x: p.xMm, y: p.yMm }, polygon.outer),
           );
 
           if (xValid && !yValid) {
@@ -746,7 +780,7 @@ export function DeckCanvas({
 
         const clampedDelta = Math.min(
           Math.max(snappedDelta, drag.limits.minDelta),
-          drag.limits.maxDelta
+          drag.limits.maxDelta,
         );
 
         const updatedOuter = drag.originalPoints.map((pt, idx) => {
@@ -808,14 +842,13 @@ export function DeckCanvas({
         }
 
         const updatedOuter = polygon.outer.map((pt, idx) =>
-          idx === dragIndex ? { xMm: snappedX, yMm: snappedY } : pt
+          idx === dragIndex ? { xMm: snappedX, yMm: snappedY } : pt,
         );
         onChangePolygon({ ...polygon, outer: updatedOuter });
         return;
       }
 
       onPanMove(event);
-
     },
     [
       buildCirclePolygon,
@@ -829,123 +862,141 @@ export function DeckCanvas({
       isPointInsideOuter,
       viewBox.h,
       viewBox.w,
-    ]
+    ],
   );
 
-  const handlePointerUp = useCallback((event: ReactPointerEvent<SVGSVGElement>) => {
-    event.preventDefault();
-    const svg = svgRef.current;
-    if (circleDragActiveRef.current) {
-      circleDragActiveRef.current = false;
-    }
-    if (circleRadiusDragRef.current && event.pointerId === circleRadiusDragRef.current.pointerId) {
-      // 요구사항:
-      // - 드래그 중에는 캔버스 밖으로 커져도 OK (반지름/면적 변경)
-      // - 드래그를 놓는 순간에는 반지름은 고정(종료 스냅만), 화면(viewBox/줌)만 원에 맞게 재조정
-      if (onChangePolygon) {
-        const drag = circleRadiusDragRef.current;
-        // 1) 현재 반지름을 확정 (종료 시에만 10mm 스냅)
-        const pts = polygon.outer;
-        const currentRadius =
-          pts.length > 0
-            ? pts.reduce((acc, p) => acc + Math.hypot(p.xMm - drag.center.x, p.yMm - drag.center.y), 0) / pts.length
-            : drag.startRadius;
-        const snappedRadius = Math.max(
-          MIN_EDGE_SPAN_MM,
-          Math.round(currentRadius / EDGE_LENGTH_STEP_MM) * EDGE_LENGTH_STEP_MM
-        );
+  const handlePointerUp = useCallback(
+    (event: ReactPointerEvent<SVGSVGElement>) => {
+      event.preventDefault();
+      const svg = svgRef.current;
+      if (circleDragActiveRef.current) {
+        circleDragActiveRef.current = false;
+      }
+      if (
+        circleRadiusDragRef.current &&
+        event.pointerId === circleRadiusDragRef.current.pointerId
+      ) {
+        // 요구사항:
+        // - 드래그 중에는 캔버스 밖으로 커져도 OK (반지름/면적 변경)
+        // - 드래그를 놓는 순간에는 반지름은 고정(종료 스냅만), 화면(viewBox/줌)만 원에 맞게 재조정
+        if (onChangePolygon) {
+          const drag = circleRadiusDragRef.current;
+          // 1) 현재 반지름을 확정 (종료 시에만 10mm 스냅)
+          const pts = polygon.outer;
+          const currentRadius =
+            pts.length > 0
+              ? pts.reduce(
+                  (acc, p) => acc + Math.hypot(p.xMm - drag.center.x, p.yMm - drag.center.y),
+                  0,
+                ) / pts.length
+              : drag.startRadius;
+          const snappedRadius = Math.max(
+            MIN_EDGE_SPAN_MM,
+            Math.round(currentRadius / EDGE_LENGTH_STEP_MM) * EDGE_LENGTH_STEP_MM,
+          );
 
-        const seg = circleSegmentsForSagitta(snappedRadius, 10);
-        const newOuter = buildCirclePolygon(drag.center, snappedRadius, seg);
-        onChangePolygon({ ...polygon, outer: newOuter });
+          const seg = circleSegmentsForSagitta(snappedRadius, 10);
+          const newOuter = buildCirclePolygon(drag.center, snappedRadius, seg);
+          onChangePolygon({ ...polygon, outer: newOuter });
 
-        // 2) 화면(viewBox)만 원에 맞게 재조정 (너무 꽉 차지 않게 약간 여유)
-        const VIEW_FIT_PADDING = 1.15;
-        const diameter = snappedRadius * 2;
-        const newW = Math.max(diameter * VIEW_FIT_PADDING, 400);
-        const newH = Math.max(diameter * VIEW_FIT_PADDING, 400);
-        const nextViewBox = {
-          x: drag.center.x - newW / 2,
-          y: drag.center.y - newH / 2,
-          w: newW,
-          h: newH,
-        };
+          // 2) 화면(viewBox)만 원에 맞게 재조정 (너무 꽉 차지 않게 약간 여유)
+          const VIEW_FIT_PADDING = 1.15;
+          const diameter = snappedRadius * 2;
+          const newW = Math.max(diameter * VIEW_FIT_PADDING, 400);
+          const newH = Math.max(diameter * VIEW_FIT_PADDING, 400);
+          const nextViewBox = {
+            x: drag.center.x - newW / 2,
+            y: drag.center.y - newH / 2,
+            w: newW,
+            h: newH,
+          };
 
-        setViewBox(nextViewBox);
-        setScale(1);
+          setViewBox(nextViewBox);
+          setScale(1);
+        }
+
+        if (svg && svg.hasPointerCapture?.(circleRadiusDragRef.current.pointerId)) {
+          svg.releasePointerCapture(circleRadiusDragRef.current.pointerId);
+        }
+        circleRadiusDragRef.current = null;
       }
 
-      if (svg && svg.hasPointerCapture?.(circleRadiusDragRef.current.pointerId)) {
-        svg.releasePointerCapture(circleRadiusDragRef.current.pointerId);
+      if (edgeDragRef.current && event.pointerId === edgeDragRef.current.pointerId) {
+        if (svg && svg.hasPointerCapture?.(edgeDragRef.current.pointerId)) {
+          svg.releasePointerCapture(edgeDragRef.current.pointerId);
+        }
+        edgeDragRef.current = null;
+        setIsEdgeDragging(false);
+        setActiveEdgeId(null);
+        setHoverEdgeId(null);
+        commitHistory(); // Commit history after edge drag ends
       }
-      circleRadiusDragRef.current = null;
-    }
 
-    if (edgeDragRef.current && event.pointerId === edgeDragRef.current.pointerId) {
-      if (svg && svg.hasPointerCapture?.(edgeDragRef.current.pointerId)) {
-        svg.releasePointerCapture(edgeDragRef.current.pointerId);
+      if (holeVertexDragRef.current && event.pointerId === holeVertexDragRef.current.pointerId) {
+        if (svg && svg.hasPointerCapture?.(holeVertexDragRef.current.pointerId)) {
+          svg.releasePointerCapture(holeVertexDragRef.current.pointerId);
+        }
+        holeVertexDragRef.current = null;
       }
-      edgeDragRef.current = null;
-      setIsEdgeDragging(false);
-      setActiveEdgeId(null);
-      setHoverEdgeId(null);
-    }
 
-    if (holeVertexDragRef.current && event.pointerId === holeVertexDragRef.current.pointerId) {
-      if (svg && svg.hasPointerCapture?.(holeVertexDragRef.current.pointerId)) {
-        svg.releasePointerCapture(holeVertexDragRef.current.pointerId);
+      if (holeCornerDragRef.current && event.pointerId === holeCornerDragRef.current.pointerId) {
+        if (svg && svg.hasPointerCapture?.(holeCornerDragRef.current.pointerId)) {
+          svg.releasePointerCapture(holeCornerDragRef.current.pointerId);
+        }
+        holeCornerDragRef.current = null;
       }
-      holeVertexDragRef.current = null;
-    }
 
-    if (holeCornerDragRef.current && event.pointerId === holeCornerDragRef.current.pointerId) {
-      if (svg && svg.hasPointerCapture?.(holeCornerDragRef.current.pointerId)) {
-        svg.releasePointerCapture(holeCornerDragRef.current.pointerId);
+      if (holeEdgeDragRef.current && event.pointerId === holeEdgeDragRef.current.pointerId) {
+        if (svg && svg.hasPointerCapture?.(holeEdgeDragRef.current.pointerId)) {
+          svg.releasePointerCapture(holeEdgeDragRef.current.pointerId);
+        }
+        holeEdgeDragRef.current = null;
       }
-      holeCornerDragRef.current = null;
-    }
 
-    if (holeEdgeDragRef.current && event.pointerId === holeEdgeDragRef.current.pointerId) {
-      if (svg && svg.hasPointerCapture?.(holeEdgeDragRef.current.pointerId)) {
-        svg.releasePointerCapture(holeEdgeDragRef.current.pointerId);
+      if (holeMoveDragRef.current && event.pointerId === holeMoveDragRef.current.pointerId) {
+        if (svg && svg.hasPointerCapture?.(holeMoveDragRef.current.pointerId)) {
+          svg.releasePointerCapture(holeMoveDragRef.current.pointerId);
+        }
+        holeMoveDragRef.current = null;
+        setIsHoleMoving(false);
       }
-      holeEdgeDragRef.current = null;
-    }
 
-    if (holeMoveDragRef.current && event.pointerId === holeMoveDragRef.current.pointerId) {
-      if (svg && svg.hasPointerCapture?.(holeMoveDragRef.current.pointerId)) {
-        svg.releasePointerCapture(holeMoveDragRef.current.pointerId);
+      if (cutoutDragRef.current && event.pointerId === cutoutDragRef.current.pointerId) {
+        if (svg && svg.hasPointerCapture?.(cutoutDragRef.current.pointerId)) {
+          svg.releasePointerCapture(cutoutDragRef.current.pointerId);
+        }
+        // Commit draft cutout if valid
+        if (draftCutoutPoints && draftCutoutPoints.length >= 3) {
+          appendHole(draftCutoutPoints);
+        }
+        setDraftCutoutPoints(null);
+        cutoutDragRef.current = null;
       }
-      holeMoveDragRef.current = null;
-      setIsHoleMoving(false);
-    }
 
-    if (cutoutDragRef.current && event.pointerId === cutoutDragRef.current.pointerId) {
-      if (svg && svg.hasPointerCapture?.(cutoutDragRef.current.pointerId)) {
-        svg.releasePointerCapture(cutoutDragRef.current.pointerId);
+      if (dragIndex !== null) {
+        if (svg && pointerIdRef.current !== null && svg.hasPointerCapture?.(pointerIdRef.current)) {
+          svg.releasePointerCapture(pointerIdRef.current);
+        }
+        pointerIdRef.current = null;
+        setDragIndex(null);
+        commitHistory(); // Commit history after vertex drag ends
       }
-      // Commit draft cutout if valid
-      if (draftCutoutPoints && draftCutoutPoints.length >= 3) {
-        appendHole(draftCutoutPoints);
-      }
-      setDraftCutoutPoints(null);
-      cutoutDragRef.current = null;
-    }
 
-    if (dragIndex !== null) {
-      if (svg && pointerIdRef.current !== null && svg.hasPointerCapture?.(pointerIdRef.current)) {
-        svg.releasePointerCapture(pointerIdRef.current);
-      }
-      pointerIdRef.current = null;
-      setDragIndex(null);
-    }
-
-    onPanEnd(event);
-
-  }, [buildCirclePolygon, dragIndex, onChangePolygon, polygon, appendHole, draftCutoutPoints]);
+      onPanEnd(event);
+    },
+    [
+      buildCirclePolygon,
+      dragIndex,
+      onChangePolygon,
+      polygon,
+      appendHole,
+      draftCutoutPoints,
+      commitHistory,
+    ],
+  );
 
   const startDrag = useCallback(
-    (idx: number) => (event: ReactPointerEvent<SVGCircleElement>) => {
+    (idx: number) => (event: ReactPointerEvent) => {
       if (!isEditable) return;
       // Allow vertex drag always (user request: drag/move possible in normal mode)
       // Exception: activeTool === "delete" handled below
@@ -957,6 +1008,7 @@ export function DeckCanvas({
         if (!onChangePolygon) return;
         const nextOuter = polygon.outer.filter((_, i) => i !== idx);
         onChangePolygon({ ...polygon, outer: nextOuter });
+        onChangeShapeType?.("free"); // 꼭지점 삭제 시 자유형으로 변경
         return;
       }
 
@@ -964,16 +1016,17 @@ export function DeckCanvas({
 
       event.preventDefault();
       event.stopPropagation();
+      pauseHistory(); // Pause history during drag
       pointerIdRef.current = event.pointerId;
       svgRef.current?.setPointerCapture?.(event.pointerId);
       setDragIndex(idx);
       // 원형 드래그는 더 이상 특별 처리하지 않음
     },
-    [activeTool, isEditable, onChangePolygon, polygon, shapeInfo]
+    [activeTool, isEditable, onChangePolygon, onChangeShapeType, polygon, shapeInfo, pauseHistory],
   );
 
   const startEdgeDrag = useCallback(
-    (handle: EdgeHandle) => (event: ReactPointerEvent<SVGLineElement>) => {
+    (handle: EdgeHandle) => (event: ReactPointerEvent) => {
       // Wall(ledger) selection mode: toggle edge index instead of dragging
       if (activeTool === "wall" && onChangeAttachedEdgeIndices) {
         event.preventDefault();
@@ -1002,9 +1055,20 @@ export function DeckCanvas({
       };
       setActiveEdgeId(handle.id);
       setIsEdgeDragging(true);
+      pauseHistory(); // Pause history during edge drag
       svgRef.current?.setPointerCapture?.(event.pointerId);
     },
-    [activeTool, attachedEdgeIndices, enableEdgeControls, isEditable, onChangeAttachedEdgeIndices, onChangePolygon, polygon.outer, toWorldCoords]
+    [
+      activeTool,
+      attachedEdgeIndices,
+      enableEdgeControls,
+      isEditable,
+      onChangeAttachedEdgeIndices,
+      onChangePolygon,
+      polygon.outer,
+      toWorldCoords,
+      pauseHistory,
+    ],
   );
 
   const updateHoverAddHandle = useCallback(
@@ -1015,13 +1079,16 @@ export function DeckCanvas({
       const pts = polygon.outer;
       const start = pts[edgeIndex];
       const end = pts[(edgeIndex + 1) % pts.length];
-      const projected = projectPointToSegment(world, { x: start.xMm, y: start.yMm }, { x: end.xMm, y: end.yMm });
+      const projected = projectPointToSegment(
+        world,
+        { x: start.xMm, y: start.yMm },
+        { x: end.xMm, y: end.yMm },
+      );
       setHoverAddEdgeIndex(edgeIndex);
       setHoverAddPoint(projected);
     },
-    [activeTool, polygon.outer, toWorldCoords]
+    [activeTool, polygon.outer, toWorldCoords],
   );
-
 
   const handleAddHandleClick = useCallback(
     (insertIndex: number, position: { x: number; y: number }) =>
@@ -1042,16 +1109,13 @@ export function DeckCanvas({
         ];
 
         onChangePolygon({ ...polygon, outer: newOuter });
+        onChangeShapeType?.("free"); // 꼭지점 추가 시 자유형으로 변경
         pointerIdRef.current = event.pointerId;
         svgRef.current?.setPointerCapture?.(event.pointerId);
         setDragIndex(insertIndex);
       },
-    [isEditable, onChangePolygon, polygon]
+    [isEditable, onChangePolygon, onChangeShapeType, polygon],
   );
-
-
-
-
 
   // Auto-center view when polygon changes (but not during dragging)
   useEffect(() => {
@@ -1117,7 +1181,11 @@ export function DeckCanvas({
 
         // rectangle/circle drag create (free cutout removed)
         if (cutoutShape !== "free") {
-          cutoutDragRef.current = { pointerId: event.pointerId, shape: cutoutShape, startWorld: world };
+          cutoutDragRef.current = {
+            pointerId: event.pointerId,
+            shape: cutoutShape,
+            startWorld: world,
+          };
           svgRef.current?.setPointerCapture?.(event.pointerId);
           setDraftCutoutPoints(null);
         }
@@ -1127,15 +1195,7 @@ export function DeckCanvas({
       // Always try to start pan (will be filtered in startPan)
       startPan(event);
     },
-    [
-      activeTool,
-      appendHole,
-      cutoutShape,
-      isEditable,
-      onChangePolygon,
-      startPan,
-      toWorldCoords,
-    ]
+    [activeTool, appendHole, cutoutShape, isEditable, onChangePolygon, startPan, toWorldCoords],
   );
 
   return (
@@ -1184,49 +1244,98 @@ export function DeckCanvas({
         onWheel={handleWheel}
       >
         <g transform={transformGroup}>
-          {/* Substructure Rendering */}
+          {/* Substructure Rendering - Improved Technical Style */}
           {isSubView && structureLayout && (
             <g pointerEvents="none">
-              {/* Bearers (Primary) - 굵은 선, 갈색 */}
+              {/* 1. Bearers (멍에) - 하단 지지 구조, 묵직한 느낌 */}
               {structureLayout.bearers.map((b, i) => (
-                <line
-                  key={`bearer-${i}`}
-                  x1={b.x1}
-                  y1={b.y1}
-                  x2={b.x2}
-                  y2={b.y2}
-                  stroke="#8B4513"
-                  strokeWidth={10}
-                  strokeOpacity={0.8}
-                  strokeLinecap="square"
-                />
+                <g key={`bearer-${i}`}>
+                  {/* 외곽선으로 그림자/두께감 표현 */}
+                  <line
+                    x1={b.x1}
+                    y1={b.y1}
+                    x2={b.x2}
+                    y2={b.y2}
+                    stroke="#455A64"
+                    strokeWidth={100}
+                    strokeLinecap="square"
+                    opacity={0.8}
+                  />
+                  {/* 내부 색상 */}
+                  <line
+                    x1={b.x1}
+                    y1={b.y1}
+                    x2={b.x2}
+                    y2={b.y2}
+                    stroke="#607D8B"
+                    strokeWidth={92}
+                    strokeLinecap="square"
+                  />
+                </g>
               ))}
-              {/* Joists (Secondary) - 얇은 선, 회색 */}
+
+              {/* 2. Joists (장선) - 상단 지지 구조, 밝은 느낌 */}
               {structureLayout.joists.map((j, i) => (
-                <line
-                  key={`joist-${i}`}
-                  x1={j.x1}
-                  y1={j.y1}
-                  x2={j.x2}
-                  y2={j.y2}
-                  stroke="#666"
-                  strokeWidth={4}
-                  strokeOpacity={0.9}
-                />
+                <g key={`joist-${i}`}>
+                  {/* 외곽선 */}
+                  <line
+                    x1={j.x1}
+                    y1={j.y1}
+                    x2={j.x2}
+                    y2={j.y2}
+                    stroke="#546E7A"
+                    strokeWidth={50}
+                    strokeLinecap="square"
+                    opacity={0.9}
+                  />
+                  {/* 내부 색상 - 밝게 처리하여 위에 있음을 강조 */}
+                  <line
+                    x1={j.x1}
+                    y1={j.y1}
+                    x2={j.x2}
+                    y2={j.y2}
+                    stroke="#CFD8DC"
+                    strokeWidth={46}
+                    strokeLinecap="square"
+                  />
+                </g>
               ))}
-              {/* Piles - 원형, 검정 */}
+
+              {/* 3. Piles (기초) - 도면 심볼 스타일 */}
               {structureLayout.piles.map((p, i) => (
-                <circle
-                  key={`pile-${i}`}
-                  cx={p.xMm}
-                  cy={p.yMm}
-                  r={15}
-                  fill="#333"
-                  stroke="none"
-                  opacity={0.8}
-                />
+                <g key={`pile-${i}`} transform={`translate(${p.xMm}, ${p.yMm})`}>
+                  {/* 기초 콘크리트 패드 (사각형) */}
+                  <rect
+                    x={-150}
+                    y={-150}
+                    width={300}
+                    height={300}
+                    fill="#F5F5F5"
+                    stroke="#B0BEC5"
+                    strokeWidth={1}
+                    rx={4}
+                    opacity={0.9}
+                  />
+                  {/* 주춧돌 (원형) */}
+                  <circle r={100} fill="#ECEFF1" stroke="#78909C" strokeWidth={2} />
+                  {/* 중심점 (십자선) - 정밀 포인트 */}
+                  <line x1={-15} y1={0} x2={15} y2={0} stroke="#EF5350" strokeWidth={2} />
+                  <line x1={0} y1={-15} x2={0} y2={15} stroke="#EF5350" strokeWidth={2} />
+                </g>
               ))}
             </g>
+          )}
+
+          {/* 데크 보드 패턴 (재단 계획 보기에서만 표시) */}
+          {isCutPlanView && cutPlan && !isCircle && (
+            <DeckBoardPattern
+              polygon={polygon}
+              cutPlan={cutPlan}
+              boardWidthMm={boardWidthMm}
+              gapMm={gapMm}
+              deckingDirectionDeg={deckingDirectionDeg}
+              opacity={0.7}
+            />
           )}
 
           {/* 모든 형태를 직사각형과 동일한 설정으로 렌더링 (POLYGON_STYLE 사용) */}
@@ -1242,17 +1351,23 @@ export function DeckCanvas({
                 ? POLYGON_STYLE.fill.subView
                 : isEdgeDragging || activeTool !== null
                   ? POLYGON_STYLE.fill.dragging
-                  : POLYGON_STYLE.fill.normal,
+                  : isCutPlanView && cutPlan && !isCircle
+                    ? "transparent"
+                    : POLYGON_STYLE.fill.normal,
               stroke: POLYGON_STYLE.stroke,
-              strokeWidth: isSubView ? POLYGON_STYLE.strokeWidth.subView : POLYGON_STYLE.strokeWidth.normal,
+              strokeWidth: isSubView
+                ? POLYGON_STYLE.strokeWidth.subView
+                : isPolygonHovered
+                  ? POLYGON_STYLE.strokeWidth.hover
+                  : POLYGON_STYLE.strokeWidth.normal,
               strokeLinejoin: POLYGON_STYLE.strokeLinejoin,
               strokeLinecap: POLYGON_STYLE.strokeLinecap,
               opacity: isSubView ? POLYGON_STYLE.opacity.subView : POLYGON_STYLE.opacity.normal,
               cutoutFill: "#fafafa",
               cutoutStroke: "#ff6b6b",
             }}
-            onCircleOutlineEnter={() => setIsCircleOutlineHovered(true)}
-            onCircleOutlineLeave={() => setIsCircleOutlineHovered(false)}
+            onPolygonEnter={() => setIsPolygonHovered(true)}
+            onPolygonLeave={() => setIsPolygonHovered(false)}
             onCircleOutlineDown={(e) => {
               if (!onChangePolygon) return;
               const world = toWorldCoords(e.clientX, e.clientY);
@@ -1262,7 +1377,7 @@ export function DeckCanvas({
               circleDragActiveRef.current = true;
               const startRawRadius = Math.hypot(
                 world.x - (circleCenter?.x || 0),
-                world.y - (circleCenter?.y || 0)
+                world.y - (circleCenter?.y || 0),
               );
               if (!circleCenter) return;
               const startWorld = world;
@@ -1398,11 +1513,15 @@ export function DeckCanvas({
             activeTool={activeTool}
             isEditable={isEditable}
             isCircle={isCircle}
-            onVertexDown={(i: number, e: React.PointerEvent) => startDrag(i)(e as any)}
+            onVertexDown={(i: number, e: React.PointerEvent) => startDrag(i)(e)}
             onHoleVertexDown={(hIdx, vIdx, e) => {
               e.preventDefault();
               e.stopPropagation();
-              holeVertexDragRef.current = { pointerId: e.pointerId, holeIndex: hIdx, vertexIndex: vIdx };
+              holeVertexDragRef.current = {
+                pointerId: e.pointerId,
+                holeIndex: hIdx,
+                vertexIndex: vIdx,
+              };
               svgRef.current?.setPointerCapture?.(e.pointerId);
             }}
           />
@@ -1416,7 +1535,7 @@ export function DeckCanvas({
               hoverEdgeId={hoverEdgeId}
               activeEdgeId={activeEdgeId}
               isEdgeDragging={isEdgeDragging}
-              onEdgeDown={(handle: EdgeHandle, e: React.PointerEvent) => startEdgeDrag(handle)(e as any)}
+              onEdgeDown={(handle: EdgeHandle, e: React.PointerEvent) => startEdgeDrag(handle)(e)}
               onEdgeEnter={(id: string) => setHoverEdgeId(id)}
               onEdgeLeave={(id: string) => {
                 if (!isEdgeDragging || activeEdgeId !== id) {
@@ -1425,58 +1544,70 @@ export function DeckCanvas({
               }}
               showAddHelpers={activeTool === "add"}
               polygonOuter={polygon.outer}
-              onUpdateHoverAdd={(idx: number, x: number, y: number) => updateHoverAddHandle(idx, x, y)}
+              onUpdateHoverAdd={(idx: number, x: number, y: number) =>
+                updateHoverAddHandle(idx, x, y)
+              }
               onLeaveHoverAdd={() => {
-                setHoverAddEdgeIndex((current: number | null) => (current !== null ? null : current));
+                setHoverAddEdgeIndex((current: number | null) =>
+                  current !== null ? null : current,
+                );
                 setHoverAddPoint(null);
               }}
               hoverAddHandle={
                 activeTool === "add" && hoverAddEdgeIndex !== null && hoverAddPoint
                   ? {
-                    id: `add-${hoverAddEdgeIndex}`,
-                    position: hoverAddPoint,
-                    insertIndex: hoverAddEdgeIndex + 1,
-                  }
+                      id: `add-${hoverAddEdgeIndex}`,
+                      position: hoverAddPoint,
+                      insertIndex: hoverAddEdgeIndex + 1,
+                    }
                   : null
               }
-              onAddHandleClick={(idx: number, pos: { x: number, y: number }, e: React.PointerEvent) => {
-                if (handleAddHandleClick) handleAddHandleClick(idx, pos)(e as any);
+              onAddHandleClick={(
+                idx: number,
+                pos: { x: number; y: number },
+                e: React.PointerEvent,
+              ) => {
+                if (handleAddHandleClick) handleAddHandleClick(idx, pos)(e);
               }}
             />
           )}
 
           {/* Circle radius handle removed: resize by dragging the outline */}
-
         </g>
 
         {/* 텍스트 라벨들 - 꼭지점 알파벳 라벨은 표시하지 않음 */}
 
-        {!isCircle && edgeLabels.map((edge) => {
-          const pos = transformPoint(edge.position.x, edge.position.y);
-          return (
-            <g key={`edge-label-${edge.id}`} style={{ cursor: "default" }}>
-              <text
-                x={pos.x}
-                y={pos.y}
-                fontSize={suggestedEdgeFontUser}
-                fill="#0b2540"
-                textAnchor="middle"
-                pointerEvents="none"
-                style={{ cursor: "default" }}
-                transform={`rotate(${edge.rotationDeg}, ${pos.x}, ${pos.y})`}
-              >
-                {edge.text}
-              </text>
-            </g>
-          );
-        })}
+        {!isCircle &&
+          edgeLabels.map((edge) => {
+            const pos = transformPoint(edge.position.x, edge.position.y);
+            return (
+              <g key={`edge-label-${edge.id}`} style={{ cursor: "default" }}>
+                <text
+                  x={pos.x}
+                  y={pos.y}
+                  fontSize={suggestedEdgeFontUser}
+                  fill="#0b2540"
+                  textAnchor="middle"
+                  pointerEvents="none"
+                  style={{ cursor: "default" }}
+                  transform={`rotate(${edge.rotationDeg}, ${pos.x}, ${pos.y})`}
+                >
+                  {edge.text}
+                </text>
+              </g>
+            );
+          })}
 
         {isSubView && (
           <text x={viewBox.x + 20} y={viewBox.y + 30} fill="#555" fontSize={20}>
             하부 구조 보기
           </text>
         )}
-
+        {isCutPlanView && (
+          <text x={viewBox.x + 20} y={viewBox.y + 30} fill="#555" fontSize={20}>
+            재단 계획 보기
+          </text>
+        )}
       </svg>
 
       {/* Exit edit mode button - shown only when in edit mode */}
@@ -1518,7 +1649,6 @@ export function DeckCanvas({
         </div>
       )}
 
-
       <CanvasControlsTopLeft
         controls={[
           {
@@ -1546,31 +1676,9 @@ export function DeckCanvas({
             activeBg: "#ffe6e6",
           },
           {
-            key: "wall",
-            label: "벽체",
-            onClick: () => {
-              setActiveTool((prev) => (prev === "wall" ? null : "wall"));
-              setHoverAddEdgeIndex(null);
-              setHoverAddPoint(null);
-            },
-            active: activeTool === "wall",
-            activeColor: "#444",
-            activeBg: "#eee",
-          },
-          {
-            key: "cutout",
-            label: "컷아웃",
-            onClick: () => {
-              const nextEnabled = activeTool !== "cutout";
-              setActiveTool(nextEnabled ? "cutout" : null);
-              setHoverAddEdgeIndex(null);
-              setHoverAddPoint(null);
-              setDraftCutoutPoints(null);
-              onChangeCutoutMode?.({ enabled: nextEnabled, shape: cutoutShape });
-            },
-            active: activeTool === "cutout",
-            activeColor: "#ff6b6b",
-            activeBg: "#fff1f1",
+            key: "clear",
+            label: "지우기",
+            onClick: handleClear,
           },
         ]}
       />
@@ -1615,11 +1723,79 @@ export function DeckCanvas({
         ]}
       />
 
+      {/* 재단 계획 범례 (좌측 하단) */}
+      {isCutPlanView && cutPlanLegend && cutPlanLegend.items.length > 0 && (
+        <div
+          style={{
+            position: "absolute",
+            right: 16,
+            top: "50%",
+            transform: "translateY(-50%)",
+            padding: CANVAS_CONTROLS_STYLE.container.padding,
+            background: CANVAS_CONTROLS_STYLE.container.background,
+            borderRadius: CANVAS_CONTROLS_STYLE.container.borderRadius,
+            boxShadow: CANVAS_CONTROLS_STYLE.container.boxShadow,
+            pointerEvents: "none",
+            zIndex: 2,
+            minWidth: 220,
+            maxWidth: 260,
+            maxHeight: 240,
+            overflow: "hidden",
+          }}
+        >
+          <div style={{ fontSize: 12, fontWeight: 700, color: "#333", marginBottom: 6 }}>
+            재단 계획 · 길이별 개수
+          </div>
+
+          <div style={{ display: "grid", gap: 4, maxHeight: 180, overflowY: "auto" }}>
+            {cutPlanLegend.items.map((it) => (
+              <div
+                key={it.key}
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                  gap: 10,
+                }}
+              >
+                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  <span
+                    style={{
+                      width: 14,
+                      height: 10,
+                      background: it.color,
+                      border: "1px solid rgba(0,0,0,0.25)",
+                      borderRadius: 2,
+                      flex: "0 0 auto",
+                    }}
+                  />
+                  <span style={{ fontSize: 12, color: "#333" }}>{it.label}</span>
+                </div>
+                <span style={{ fontSize: 12, color: "#111", fontWeight: 700 }}>{it.count}개</span>
+              </div>
+            ))}
+          </div>
+
+          <div style={{ marginTop: 8, borderTop: "1px solid rgba(0,0,0,0.08)", paddingTop: 6 }}>
+            <div style={{ fontSize: 12, color: "#444" }}>
+              합계: <b>{cutPlanLegend.totalPieces.toLocaleString()}</b>개
+            </div>
+            <div style={{ fontSize: 12, color: "#444" }}>
+              보드수(대략): <b>{cutPlanLegend.boardsApprox.toLocaleString()}장</b>{" "}
+              <span style={{ opacity: 0.8 }}>
+                (총 {Math.round(cutPlanLegend.totalLengthMm).toLocaleString()}mm ÷{" "}
+                {cutPlanLegend.stockLengthMm.toLocaleString()}mm)
+              </span>
+            </div>
+          </div>
+        </div>
+      )}
+
       <CanvasControlsBottomRight
         controls={[
           {
             key: "view-mode-toggle",
-            label: viewMode === "deck" ? "하부 보기" : "상판 보기",
+            label: `${viewModeLabel[nextViewMode]}로 전환`,
             onClick: onToggleViewMode || (() => {}),
             disabled: !onToggleViewMode,
           },
