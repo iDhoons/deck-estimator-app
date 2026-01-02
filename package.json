@@ -27,13 +27,7 @@
     "fresh": "npm run clean && npm run build",
     "check:exports": "node scripts/check-exports.js",
     "format": "prettier -w .",
-    "format:check": "prettier -c .",
-    "prepare": "husky"
-  },
-  "lint-staged": {
-    "**/*.{ts,tsx,js,jsx,json,md,yml,yaml,css,scss}": [
-      "prettier -w"
-    ]
+    "format:check": "prettier -c ."
   },
   "keywords": [
     "deck",
@@ -44,8 +38,6 @@
   "license": "ISC",
   "devDependencies": {
     "@playwright/test": "^1.57.0",
-    "husky": "^9.1.7",
-    "lint-staged": "^16.2.7",
     "prettier": "^3.7.4",
     "typescript": "^5.9.3"
   }

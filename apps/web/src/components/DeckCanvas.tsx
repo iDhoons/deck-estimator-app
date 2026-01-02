@@ -1092,7 +1092,7 @@ export function DeckCanvas({
 
   const handleAddHandleClick = useCallback(
     (insertIndex: number, position: { x: number; y: number }) =>
-      (event: ReactPointerEvent<SVGCircleElement>) => {
+      (event: ReactPointerEvent) => {
         if (!isEditable || !onChangePolygon) return;
         event.preventDefault();
         event.stopPropagation();
