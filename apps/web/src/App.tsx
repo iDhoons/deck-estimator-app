@@ -286,7 +286,7 @@ export default function App() {
         <ControlsPanel
           shapeOptions={shapeOptions}
           selectedShapeId={shapeType}
-          onSelectShape={(shapeId) => {
+          onSelectShape={(shapeId: string) => {
             applyPresetShape(shapeId as ShapeType);
             // Reset free-form closed state when switching shapes
             if (shapeId === "free") {
@@ -297,7 +297,7 @@ export default function App() {
             }
           }}
           dimensions={showFreeDraw ? [] : dimensionItems}
-          onChangeDimensionLength={(edgeId, lengthMm) => {
+          onChangeDimensionLength={(edgeId: string, lengthMm: number) => {
             const target = dimensionItems.find((edge) => edge.id === edgeId);
             if (!target) return false;
             return changeEdgeLength(target.startIndex, lengthMm);
@@ -312,23 +312,23 @@ export default function App() {
             primaryLenMm: plan.substructureOverrides?.primaryLenMm,
             secondaryLenMm: plan.substructureOverrides?.secondaryLenMm,
           }}
-          onChangeSubstructureOverridesMm={(next) =>
+          onChangeSubstructureOverridesMm={(next: { primaryLenMm?: number; secondaryLenMm?: number }) =>
             setPlanAction((prev) => ({ ...prev, substructureOverrides: next }))
           }
           stairs={plan.stairs}
-          onChangeStairs={(next) => setPlanAction((prev) => ({ ...prev, stairs: next }))}
+          onChangeStairs={(next: { enabled: boolean; items: import("@deck/core").StairConfig[]; stringerMaterialOverrides?: { thicknessMm?: number; widthMm?: number; stockLengthMm?: number } }) => setPlanAction((prev) => ({ ...prev, stairs: next }))}
           cutouts={plan.polygon.holes ?? []}
           onAddCutout={addCutout}
           onDeleteCutout={deleteCutout}
           cutoutsMeta={cutoutsMeta}
           onChangeCutout={changeCutout}
           attachedEdgeIndices={plan.attachedEdgeIndices}
-          onChangeAttachedEdgeIndices={(indices) => {
+          onChangeAttachedEdgeIndices={(indices: number[]) => {
             console.log("[DEBUG App] onChangeAttachedEdgeIndices called with:", indices);
             setPlanAction((prev) => ({ ...prev, attachedEdgeIndices: indices }));
           }}
           fasciaEdgeIndices={plan.fasciaEdgeIndices}
-          onChangeFasciaEdgeIndices={(indices) => {
+          onChangeFasciaEdgeIndices={(indices: number[]) => {
             console.log("[DEBUG App] onChangeFasciaEdgeIndices called with:", indices);
             setPlanAction((prev) => ({ ...prev, fasciaEdgeIndices: indices }));
           }}
