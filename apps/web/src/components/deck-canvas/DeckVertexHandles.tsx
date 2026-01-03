@@ -69,12 +69,13 @@ export const DeckVertexHandles = React.memo(function DeckVertexHandles({
 
         return (
           <g key={`vertex-${idx}`}>
-            {/* Only show vertex handle circle in add/delete mode */}
+            {/* Only show vertex handle rectangle in add/delete mode or for preset shapes */}
             {showVertexHandles && (
-              <circle
-                cx={point.xMm}
-                cy={point.yMm}
-                r={8}
+              <rect
+                x={point.xMm - 6}
+                y={point.yMm - 6}
+                width={12}
+                height={12}
                 fill={fill}
                 stroke={stroke}
                 strokeWidth={2}

@@ -20,6 +20,7 @@ import {
   getClippedGridLines,
   rotatePoint,
   pointToSegmentDistance,
+  generateOpeningFraming,
 } from "./geometry.js";
 import { calculateStairs } from "./calculateStairs.js";
 
@@ -249,11 +250,27 @@ export function calculateQuantities(
   // 모든 외곽이 멍에이므로, 장선은 내부 장선만 사용
   const rimJoists: { x1: number; y1: number; x2: number; y2: number }[] = [];
 
-  // 모든 멍에 합치기 (내부 + 외곽)
-  let bearers = [...innerBearers, ...rimBearers];
+  // 개구부(홀) 프레이밍 생성 - Header/Trimmer
+  const openingHeaders: { x1: number; y1: number; x2: number; y2: number }[] = [];
+  const openingTrimmers: { x1: number; y1: number; x2: number; y2: number }[] = [];
 
-  // 모든 장선 합치기 (내부 + 외곽)
-  const allJoists = [...innerJoists, ...rimJoists];
+  if (rotDeck.holes && rotDeck.holes.length > 0) {
+    for (const hole of rotDeck.holes) {
+      if (!hole || hole.length < 3) continue;
+      // 장선이 X축 방향이므로 joistAxis = 'x'
+      const { headers, trimmers } = generateOpeningFraming(hole, "x");
+      openingHeaders.push(...headers);
+      openingTrimmers.push(...trimmers);
+    }
+  }
+
+  // 모든 멍에 합치기 (내부 + 외곽 + 개구부 Header)
+  // Header는 장선 방향에 수직이므로 멍에(Bearer)와 같은 방향
+  let bearers = [...innerBearers, ...rimBearers, ...openingHeaders];
+
+  // 모든 장선 합치기 (내부 + 외곽 + 개구부 Trimmer)
+  // Trimmer는 장선 방향과 평행하므로 장선(Joist)으로 추가
+  const allJoists = [...innerJoists, ...rimJoists, ...openingTrimmers];
 
   // 벽체(ledger) 선택 변(복수)을 rotDeck 좌표계 선분으로 구성
   const wallEdgesRot = (() => {

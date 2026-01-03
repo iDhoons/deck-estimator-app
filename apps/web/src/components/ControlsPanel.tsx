@@ -325,6 +325,12 @@ export function ControlsPanel({
           // setState-in-effect 규칙 준수를 위해 이벤트 핸들러에서만 자동 오픈 처리
           setCutoutOpenMap({ [nextIndex]: true });
         }}
+        onKeyDown={(e) => {
+          // 스페이스바로 버튼이 클릭되는 것 방지
+          if (e.key === " ") {
+            e.preventDefault();
+          }
+        }}
         style={{
           borderColor: "#ff6b6b",
           color: "#ff6b6b",

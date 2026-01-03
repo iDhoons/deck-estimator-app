@@ -33,7 +33,10 @@ export function buildCutPlan(plan: Plan, product: Product, rules: Ruleset): CutP
   let y = minY + eps;
   let rowIndex = 0;
 
-  while (y <= maxY - eps) {
+  // 마지막 보드의 하단까지 포함하기 위해 boardWidth/2만큼 범위 확장
+  const scanMaxY = maxY + boardWidth / 2 - eps;
+
+  while (y <= scanMaxY) {
     // 3. 현재 줄의 필요 길이 계산
     const requiredLenMm = polygonSpanAtY(poly, y);
 

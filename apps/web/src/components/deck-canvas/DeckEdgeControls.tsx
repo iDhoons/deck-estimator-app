@@ -118,7 +118,7 @@ export const DeckEdgeControls = React.memo(function DeckEdgeControls({
               x2={nextPoint.xMm}
               y2={nextPoint.yMm}
               stroke="transparent"
-              strokeWidth={28}
+              strokeWidth={40}
               pointerEvents="stroke"
               onPointerEnter={(e) => onUpdateHoverAdd?.(idx, e.clientX, e.clientY)}
               onPointerMove={(e) => onUpdateHoverAdd?.(idx, e.clientX, e.clientY)}

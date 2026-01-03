@@ -178,6 +178,56 @@ export function isPointInPolygon(p: Point, poly: Polygon): boolean {
 }
 
 /**
+ * 개구부(홀) 주변을 감싸는 프레이밍(Header/Trimmer) 생성
+ * - Header: 개구부 상/하단에 가로로 배치 (장선 방향에 수직)
+ * - Trimmer: 개구부 좌/우측에 세로로 배치 (장선 방향과 평행)
+ *
+ * @param hole - 개구부 꼭짓점 배열
+ * @param joistAxis - 장선 방향 ('x': 수직선, 'y': 수평선)
+ * @returns headers와 trimmers 선분 배열
+ */
+export function generateOpeningFraming(
+  hole: Point[],
+  joistAxis: "x" | "y",
+): { headers: LineSegment[]; trimmers: LineSegment[] } {
+  if (!hole || hole.length < 3) {
+    return { headers: [], trimmers: [] };
+  }
+
+  const bb = bbox(hole);
+  const headers: LineSegment[] = [];
+  const trimmers: LineSegment[] = [];
+
+  if (joistAxis === "x") {
+    // 장선이 X축(수직선) → Header는 수평선(상/하단), Trimmer는 수직선(좌/우측)
+    // Header: 개구부 상단과 하단
+    headers.push(
+      { x1: bb.minX, y1: bb.minY, x2: bb.maxX, y2: bb.minY }, // 상단
+      { x1: bb.minX, y1: bb.maxY, x2: bb.maxX, y2: bb.maxY }, // 하단
+    );
+    // Trimmer: 개구부 좌측과 우측
+    trimmers.push(
+      { x1: bb.minX, y1: bb.minY, x2: bb.minX, y2: bb.maxY }, // 좌측
+      { x1: bb.maxX, y1: bb.minY, x2: bb.maxX, y2: bb.maxY }, // 우측
+    );
+  } else {
+    // 장선이 Y축(수평선) → Header는 수직선(좌/우측), Trimmer는 수평선(상/하단)
+    // Header: 개구부 좌측과 우측
+    headers.push(
+      { x1: bb.minX, y1: bb.minY, x2: bb.minX, y2: bb.maxY }, // 좌측
+      { x1: bb.maxX, y1: bb.minY, x2: bb.maxX, y2: bb.maxY }, // 우측
+    );
+    // Trimmer: 개구부 상단과 하단
+    trimmers.push(
+      { x1: bb.minX, y1: bb.minY, x2: bb.maxX, y2: bb.minY }, // 상단
+      { x1: bb.minX, y1: bb.maxY, x2: bb.maxX, y2: bb.maxY }, // 하단
+    );
+  }
+
+  return { headers, trimmers };
+}
+
+/**
  * 특정 간격으로 그리드 라인을 생성하고, 다각형 내부에 포함된 선분들만 반환
  * axis: 'x' -> 수직선 (x=const), 'y' -> 수평선 (y=const)
  * startFromEdge: true이면 최대 간격 기반 균등 배치 (외곽 멍에가 있을 때 사용)
